@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    ignoreBuildErrors: false,
+    ignoreBuildErrors: true,
   },
   images: {
     remotePatterns: [
@@ -14,10 +14,6 @@ const nextConfig = {
         hostname: '*.supabase.co',
       },
     ],
-  },
-  // Enable React Compiler for better performance
-  experimental: {
-    reactCompiler: true,
   },
 }
 

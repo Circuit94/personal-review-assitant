@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport } from 'ai'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,18 +15,13 @@ export function AIChat() {
   const [user, setUser] = useState<any>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading } =
+  const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages } =
     useChat({
-      transport: new DefaultChatTransport({
-        api: '/api/chat',
-        prepareSendMessagesRequest: ({ messages }) => ({
-          body: {
-            messages,
-            resumeContent,
-            interviewHistory,
-          },
-        }),
-      }),
+      api: '/api/chat',
+      body: {
+        resumeContent,
+        interviewHistory,
+      },
     })
 
   useEffect(() => {

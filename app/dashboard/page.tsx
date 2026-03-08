@@ -1,8 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth-context'
 import { Navbar } from '@/components/navbar'
 import { ResumeUpload } from '@/components/resume-upload'
 import { InterviewNotes } from '@/components/interview-notes'
@@ -12,20 +10,17 @@ import { InterviewReview } from '@/components/interview-review'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export default function DashboardPage() {
-  const router = useRouter()
-  const supabase = createClient()
+  // Auth is now handled by middleware (redirects to /auth/login if not authenticated)
+  // and AuthContext provides the user state globally
+  const { user, loading } = useAuth()
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-      }
-    }
-    checkAuth()
-  }, [router, supabase])
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-lg text-slate-500">加载中...</div>
+      </div>
+    )
+  }
 
   return (
     <>

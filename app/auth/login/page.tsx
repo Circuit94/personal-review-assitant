@@ -6,7 +6,46 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, RefreshCw } from 'lucide-react'
+
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 1000
+
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase()
+    return (
+      msg.includes('fetch') ||
+      msg.includes('network') ||
+      msg.includes('timeout') ||
+      msg.includes('econnrefused') ||
+      msg.includes('enotfound') ||
+      msg.includes('aborted')
+    )
+  }
+  return false
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase()
+    if (msg.includes('invalid login credentials')) {
+      return '邮箱或密码错误，请检查后重试'
+    }
+    if (msg.includes('email not confirmed')) {
+      return '邮箱未验证，请先检查邮箱并点击确认链接'
+    }
+    if (isNetworkError(error)) {
+      return '网络连接异常，正在重试...'
+    }
+    return error.message
+  }
+  return '登录失败，请重试'
+}
+
+async function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -15,26 +54,43 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+
+  const attemptLogin = async (retriesLeft: number): Promise<void> => {
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (signInError) {
+      // Only retry on network errors, not on auth errors
+      if (isNetworkError(signInError) && retriesLeft > 0) {
+        setRetryCount(MAX_RETRIES - retriesLeft + 1)
+        setError(`网络异常，正在第 ${MAX_RETRIES - retriesLeft + 1} 次重试...`)
+        await delay(RETRY_DELAY_MS)
+        return attemptLogin(retriesLeft - 1)
+      }
+      throw signInError
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setRetryCount(0)
     setLoading(true)
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
+      await attemptLogin(MAX_RETRIES)
 
-      if (error) throw error
-
+      // Use router.push + refresh to ensure middleware picks up new cookies
       router.push('/dashboard')
       router.refresh()
-    } catch (err: any) {
-      setError(err.message || '登录失败，请重试')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
+      setRetryCount(0)
     }
   }
 
@@ -48,8 +104,12 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             {error && (
               <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg text-sm">
-                <AlertCircle size={16} />
-                {error}
+                {retryCount > 0 ? (
+                  <RefreshCw size={16} className="animate-spin flex-shrink-0" />
+                ) : (
+                  <AlertCircle size={16} className="flex-shrink-0" />
+                )}
+                <span>{error}</span>
               </div>
             )}
 
@@ -63,6 +123,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
+                required
               />
             </div>
 
@@ -76,6 +137,8 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
+                required
+                minLength={6}
               />
             </div>
 
@@ -84,7 +147,11 @@ export default function LoginPage() {
               className="w-full"
               disabled={loading}
             >
-              {loading ? '登录中...' : '登录'}
+              {loading
+                ? retryCount > 0
+                  ? `重试中 (${retryCount}/${MAX_RETRIES})...`
+                  : '登录中...'
+                : '登录'}
             </Button>
           </form>
 

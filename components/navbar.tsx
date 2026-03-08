@@ -1,25 +1,15 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth-context'
 import { Button } from '@/components/ui/button'
 import { LogOut } from 'lucide-react'
 
 export function Navbar() {
   const router = useRouter()
   const supabase = createClient()
-  const [user, setUser] = useState<any>(null)
-
-  useEffect(() => {
-    const getUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      setUser(user)
-    }
-    getUser()
-  }, [supabase])
+  const { user } = useAuth()
 
   const handleLogout = async () => {
     await supabase.auth.signOut()

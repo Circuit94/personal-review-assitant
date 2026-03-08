@@ -9,10 +9,15 @@ import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
 import { FileText, Trash2, Upload } from 'lucide-react'
 
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+
 export function ResumeManager({ userId }: { userId: string }) {
   const [resumes, setResumes] = useState<any[]>([])
   const [uploading, setUploading] = useState(false)
   const { toast } = useToast()
+
+  const [uploadProgress, setUploadProgress] = useState(0)
 
   useEffect(() => {
     fetchResumes()
@@ -55,9 +60,10 @@ export function ResumeManager({ userId }: { userId: string }) {
     }
 
     setUploading(true)
+    setUploadProgress(0)
+
     try {
       // 2. 简易 MD5/秒传逻辑 (使用文件名+大小+用户ID模拟唯一性)
-      const fileId = `${userId}_${file.name}_${file.size}`
       const { data: existing } = await supabase
         .from('resumes')
         .select('id')
@@ -75,19 +81,46 @@ export function ResumeManager({ userId }: { userId: string }) {
       const sanitizedName = file.name.replace(/[^\x00-\x7F]/g, '_').replace(/\s+/g, '_')
       const fileName = `${userId}/${Date.now()}_${sanitizedName}`
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('resumes')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
+      // 使用 XMLHttpRequest 以获取上传进度并上传到 Supabase Storage
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('用户未登录，请重新登录')
 
-      if (uploadError) {
-        if (uploadError.message.includes('Bucket not found')) {
-          throw new Error('存储桶 "resumes" 未创建，请先在 Supabase 控制台创建。')
+      const xhr = new XMLHttpRequest()
+      const bucketId = 'resumes'
+      const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/${bucketId}/${fileName}`
+
+      const promise = new Promise((resolve, reject) => {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const progress = Math.round((event.loaded / event.total) * 100)
+            setUploadProgress(progress)
+          }
         }
-        throw uploadError
-      }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText))
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText)
+              reject(new Error(errorData.message || '上传失败'))
+            } catch {
+              reject(new Error(`上传失败 (${xhr.status})`))
+            }
+          }
+        }
+
+        xhr.onerror = () => reject(new Error('网络请求出错'))
+        xhr.ontimeout = () => reject(new Error('上传超时，请检查网络稳定性'))
+      })
+
+      xhr.open('POST', uploadUrl)
+      xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`)
+      xhr.setRequestHeader('apikey', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+      xhr.timeout = 300000 // 5分钟超时
+      xhr.send(file)
+
+      await promise
 
       const { data: { publicUrl } } = supabase.storage
         .from('resumes')
@@ -113,8 +146,8 @@ export function ResumeManager({ userId }: { userId: string }) {
       })
     } finally {
       setUploading(false)
+      setTimeout(() => setUploadProgress(0), 1000)
     }
-  }
 
   const handleDelete = async (id: string, fileUrl: string) => {
     try {
@@ -162,6 +195,18 @@ export function ResumeManager({ userId }: { userId: string }) {
           </Label>
         </div>
       </div>
+
+      {uploading && (
+        <Card className="p-4 bg-muted/30">
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs font-medium">
+              <span>正在上传简历...</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <Progress value={uploadProgress} className="h-2" />
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {resumes.map((resume) => (

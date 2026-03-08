@@ -107,14 +107,14 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       return
     }
 
-    // Limit 500MB
-    if (file.size > 500 * 1024 * 1024) {
-      toast({ title: '文件太大', description: '单个文件不能超过 500MB', variant: 'destructive' })
+    // Limit 50MB
+    if (file.size > 50 * 1024 * 1024) {
+      toast({ title: '文件太大', description: '单个文件不能超过 50MB', variant: 'destructive' })
       return
     }
 
     setUploading(true)
-    setUploadProgress(10)
+    setUploadProgress(0)
 
     try {
       const formData = new FormData()
@@ -122,17 +122,40 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       formData.append('userId', userId)
       formData.append('title', file.name.split('.')[0])
 
-      const response = await fetch('/api/audio/upload', {
-        method: 'POST',
-        body: formData,
+      // 使用 XMLHttpRequest 以获取上传进度
+      const xhr = new XMLHttpRequest()
+      
+      const promise = new Promise((resolve, reject) => {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const progress = Math.round((event.loaded / event.total) * 100)
+            setUploadProgress(progress)
+          }
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText))
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText)
+              reject(new Error(errorData.error || '上传失败'))
+            } catch {
+              reject(new Error('上传失败'))
+            }
+          }
+        }
+
+        xhr.onerror = () => reject(new Error('网络请求出错'))
+        xhr.ontimeout = () => reject(new Error('上传超时，请检查网络稳定性'))
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || '上传失败')
-      }
+      xhr.open('POST', '/api/audio/upload')
+      xhr.timeout = 600000 // 10分钟超时
+      xhr.send(formData)
+
+      await promise
       
-      setUploadProgress(100)
       toast({ title: '上传成功', description: '正在后台进行转写与智能分析...' })
       fetchRecords()
     } catch (error: any) {
@@ -140,7 +163,7 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       toast({ title: '上传失败', description: error.message, variant: 'destructive' })
     } finally {
       setUploading(false)
-      setUploadProgress(0)
+      setTimeout(() => setUploadProgress(0), 1000)
     }
   }
 
@@ -190,7 +213,7 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
               <div className="flex flex-col items-center justify-center">
                 <Upload className="h-10 w-10 text-muted-foreground mb-4" />
                 <p className="text-sm font-medium">点击或拖拽上传面试录音</p>
-                <p className="text-xs text-muted-foreground mt-2">支持 MP3, WAV, M4A (最大 500MB)</p>
+                <p className="text-xs text-muted-foreground mt-2">支持 MP3, WAV, M4A (最大 50MB)</p>
               </div>
             </div>
             {uploading && (

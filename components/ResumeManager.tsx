@@ -148,6 +148,7 @@ export function ResumeManager({ userId }: { userId: string }) {
       setUploading(false)
       setTimeout(() => setUploadProgress(0), 1000)
     }
+  }
 
   const handleDelete = async (id: string, fileUrl: string) => {
     try {

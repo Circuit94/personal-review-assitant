@@ -1,7 +1,7 @@
 -- 创建简历表
 CREATE TABLE IF NOT EXISTS resumes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   file_url TEXT NOT NULL,
   file_name TEXT NOT NULL,
   extracted_text TEXT,
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS resumes (
 -- 创建面试记录表
 CREATE TABLE IF NOT EXISTS interview_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   position TEXT,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS interview_records (
 -- 创建聊天会话表
 CREATE TABLE IF NOT EXISTS chat_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   title TEXT DEFAULT '新对话',
   session_type TEXT DEFAULT 'chat', -- 'chat' or 'mock_interview'
   position TEXT, -- 用于模拟面试的岗位
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS mock_interview_questions (
 -- 创建复盘分析表
 CREATE TABLE IF NOT EXISTS review_analyses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   analysis_type TEXT DEFAULT 'weekly', -- 'weekly', 'monthly'
   period_start DATE NOT NULL,
   period_end DATE NOT NULL,

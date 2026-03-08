@@ -9,7 +9,8 @@ import { MockInterview } from '@/components/MockInterview'
 import { ResumeManager } from '@/components/ResumeManager'
 import { InterviewRecords } from '@/components/InterviewRecords'
 import { ReviewAnalysis } from '@/components/ReviewAnalysis'
-import { LogOut, MessageSquare, Play, FileText, History, BarChart3, LayoutDashboard } from 'lucide-react'
+import { AudioInterviewSystem } from '@/components/AudioInterviewSystem'
+import { LogOut, MessageSquare, Play, FileText, History, BarChart3, LayoutDashboard, Mic } from 'lucide-react'
 
 export default function Dashboard() {
   const [user, setUser] = useState<any>(null)
@@ -93,6 +94,10 @@ export default function Dashboard() {
                 <History className="mr-2 h-4 w-4" />
                 面试记录
               </TabsTrigger>
+              <TabsTrigger value="audio" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-6">
+                <Mic className="mr-2 h-4 w-4" />
+                录音分析
+              </TabsTrigger>
               <TabsTrigger value="analysis" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-6">
                 <BarChart3 className="mr-2 h-4 w-4" />
                 复盘分析
@@ -167,6 +172,10 @@ export default function Dashboard() {
 
           <TabsContent value="records" className="mt-0">
             <InterviewRecords userId={user.id} />
+          </TabsContent>
+
+          <TabsContent value="audio" className="mt-0">
+            <AudioInterviewSystem userId={user.id} />
           </TabsContent>
 
           <TabsContent value="analysis" className="mt-0">

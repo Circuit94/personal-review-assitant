@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
-import { Mic, Upload, FileAudio, Play, Loader2, CheckCircle2, AlertCircle, BarChart3, ChevronRight, FileDown } from 'lucide-react'
+import { Mic, Upload, FileAudio, Play, Loader2, CheckCircle2, AlertCircle, BarChart3, ChevronRight, FileDown, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -77,9 +77,35 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
     }
   }
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      await processFile(file)
+    }
+  }
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (file) {
+      await processFile(file)
+    }
+  }
+
+  const processFile = async (file: File) => {
+    // 校验格式
+    const validFormats = ['.mp3', '.wav', '.m4a']
+    const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
+    if (!validFormats.includes(fileExt)) {
+      toast({ title: '格式错误', description: '仅支持 MP3, WAV, M4A 格式', variant: 'destructive' })
+      return
+    }
 
     // Limit 500MB
     if (file.size > 500 * 1024 * 1024) {
@@ -101,12 +127,16 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
         body: formData,
       })
 
-      if (!response.ok) throw new Error('上传失败')
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || '上传失败')
+      }
       
       setUploadProgress(100)
       toast({ title: '上传成功', description: '正在后台进行转写与智能分析...' })
       fetchRecords()
     } catch (error: any) {
+      console.error('上传失败详情:', error)
       toast({ title: '上传失败', description: error.message, variant: 'destructive' })
     } finally {
       setUploading(false)
@@ -145,17 +175,23 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 hover:bg-muted/50 transition-all cursor-pointer relative">
+            <div 
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 hover:bg-muted/50 transition-all cursor-pointer relative min-h-[160px]"
+            >
               <Input
                 type="file"
                 accept=".mp3,.wav,.m4a"
                 onChange={handleFileUpload}
                 disabled={uploading}
-                className="absolute inset-0 opacity-0 cursor-pointer"
+                className="absolute inset-0 opacity-0 cursor-pointer z-10"
               />
-              <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-              <p className="text-sm font-medium">点击或拖拽上传面试录音</p>
-              <p className="text-xs text-muted-foreground mt-2">支持 MP3, WAV, M4A (最大 500MB)</p>
+              <div className="flex flex-col items-center justify-center">
+                <Upload className="h-10 w-10 text-muted-foreground mb-4" />
+                <p className="text-sm font-medium">点击或拖拽上传面试录音</p>
+                <p className="text-xs text-muted-foreground mt-2">支持 MP3, WAV, M4A (最大 500MB)</p>
+              </div>
             </div>
             {uploading && (
               <div className="space-y-2">
@@ -231,6 +267,9 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
                 <Button variant="outline" size="sm" onClick={exportToExcel}>
                   <FileDown className="mr-2 h-4 w-4" />
                   导出 Excel
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedRecord(null)}>
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>

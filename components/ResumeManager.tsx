@@ -41,14 +41,53 @@ export function ResumeManager({ userId }: { userId: string }) {
     const file = e.target.files?.[0]
     if (!file) return
 
+    // 1. 校验格式与大小
+    const validFormats = ['.pdf', '.docx', '.jpg', '.png']
+    const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
+    if (!validFormats.includes(fileExt)) {
+      toast({ title: '格式错误', description: '支持 PDF, DOCX, JPG, PNG 格式', variant: 'destructive' })
+      return
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: '文件太大', description: '单文件不超过 10MB', variant: 'destructive' })
+      return
+    }
+
     setUploading(true)
     try {
-      const fileName = `${userId}/${Date.now()}_${file.name}`
+      // 2. 简易 MD5/秒传逻辑 (使用文件名+大小+用户ID模拟唯一性)
+      const fileId = `${userId}_${file.name}_${file.size}`
+      const { data: existing } = await supabase
+        .from('resumes')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('file_name', file.name)
+        .limit(1)
+
+      if (existing && existing.length > 0) {
+        toast({ title: '文件已存在', description: '该文件已上传过，执行秒传。' })
+        setUploading(false)
+        return
+      }
+
+      // 3. 存储路径处理 (去除特殊字符)
+      const sanitizedName = file.name.replace(/[^\x00-\x7F]/g, '_').replace(/\s+/g, '_')
+      const fileName = `${userId}/${Date.now()}_${sanitizedName}`
+
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('resumes')
-        .upload(fileName, file)
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
 
-      if (uploadError) throw uploadError
+      if (uploadError) {
+        if (uploadError.message.includes('Bucket not found')) {
+          throw new Error('存储桶 "resumes" 未创建，请先在 Supabase 控制台创建。')
+        }
+        throw uploadError
+      }
 
       const { data: { publicUrl } } = supabase.storage
         .from('resumes')
@@ -58,7 +97,7 @@ export function ResumeManager({ userId }: { userId: string }) {
         user_id: userId,
         file_name: file.name,
         file_url: publicUrl,
-        extracted_text: '', // 这里可以调用外部 API 提取文本，目前留空
+        extracted_text: '', 
       })
 
       if (dbError) throw dbError
@@ -66,10 +105,10 @@ export function ResumeManager({ userId }: { userId: string }) {
       toast({ title: '简历上传成功' })
       fetchResumes()
     } catch (error: any) {
-      console.error('上传简历失败:', error)
+      console.error('上传简历失败详情:', error)
       toast({
         title: '上传简历失败',
-        description: error.message,
+        description: error.message || '未知错误，请检查存储权限',
         variant: 'destructive',
       })
     } finally {

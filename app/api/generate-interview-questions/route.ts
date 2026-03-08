@@ -33,18 +33,45 @@ export async function POST(req: Request) {
       }
     `
 
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: '你是一位资深的面试官助手。' },
-        { role: 'user', content: prompt },
-      ],
-      response_format: { type: 'json_object' },
-    })
+    const maxRetries = 3
+    let lastError = null
+    let content = null
 
-    const content = response.choices[0].message.content
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const response = await openai.chat.completions.create({
+          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: '你是一位资深的面试官助手。' },
+            { role: 'user', content: prompt },
+          ],
+          response_format: { type: 'json_object' },
+          timeout: 10000, // 10s timeout
+        })
+
+        content = response.choices[0].message.content
+        if (content) break
+      } catch (err: any) {
+        lastError = err
+        console.warn(`Retry ${i + 1} failed:`, err.message)
+        // Wait a bit before retry
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+
     if (!content) {
-      throw new Error('AI 生成内容为空')
+      // Fallback: Return some generic questions if AI fails
+      console.error('AI generation failed after retries, using fallback.')
+      return NextResponse.json({
+        questions: [
+          { id: 1, question: "请做一个简单的自我介绍。", type: "behavioral" },
+          { id: 2, question: "你为什么申请这个岗位？", type: "behavioral" },
+          { id: 3, question: "你认为自己最大的优势是什么？", type: "behavioral" },
+          { id: 4, question: "在过去的项目中，你遇到过最大的挑战是什么？你是如何解决的？", type: "project" },
+          { id: 5, question: "你对未来的职业规划是什么？", type: "behavioral" }
+        ],
+        fallback: true
+      })
     }
 
     return NextResponse.json(JSON.parse(content))

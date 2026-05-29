@@ -1,38 +1,47 @@
 import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: process.env.OPENAI_API_BASE || 'https://api.openai.com/v1',
-})
+import { openai, MODEL } from '@/lib/openai'
+import { checkRateLimit } from '@/lib/rate-limit'
+import { validateString } from '@/lib/validate'
 
 export async function POST(req: Request) {
   try {
-    const { question, answer } = await req.json()
+    // 速率限制
+    const ip = req.headers.get('x-forwarded-for') || 'unknown'
+    const { allowed } = checkRateLimit(`feedback:${ip}`, { maxRequests: 20, windowMs: 60000 })
+    if (!allowed) {
+      return NextResponse.json({ error: '请求过于频繁，请稍后重试' }, { status: 429 })
+    }
 
-    const prompt = `
-      面试题目: ${question}
-      候选人回答: ${answer}
-
-      作为面试官，请对候选人的回答进行点评。
-      要求:
-      1. 指出回答中的亮点。
-      2. 指出可以改进的地方。
-      3. 给出一个更专业的回答建议。
-      4. 语气要专业且客观。
-    `
+    const body = await req.json()
+    const question = validateString(body.question, '面试题目', { maxLength: 2000 })
+    const answer = validateString(body.answer, '回答内容', { maxLength: 5000 })
 
     const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      model: MODEL,
       messages: [
-        { role: 'system', content: '你是一位资深的面试官，擅长提供建设性的面试反馈。' },
-        { role: 'user', content: prompt },
+        {
+          role: 'system',
+          content: `你是一位经验丰富的面试官，正在对候选人的回答进行专业点评。
+请从以下维度给出反馈：
+1. 亮点：回答中做得好的地方
+2. 改进点：可以优化的方面
+3. 专业建议：如何让回答更加出色
+4. 参考答案要点：这道题的理想回答应该包含哪些关键点
+
+请用友好但专业的语气，给出具体可操作的建议。`,
+        },
+        {
+          role: 'user',
+          content: `面试题目：${question}\n\n候选人回答：${answer}`,
+        },
       ],
     })
 
-    return NextResponse.json({ feedback: response.choices[0].message.content })
-  } catch (error: any) {
-    console.error('Feedback error:', error)
-    return NextResponse.json({ error: '获取反馈失败' }, { status: 500 })
+    const feedback = response.choices[0].message.content
+    return NextResponse.json({ feedback })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '获取反馈失败'
+    console.error('Error getting feedback:', message)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

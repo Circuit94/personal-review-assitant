@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -27,14 +27,8 @@ export function ResumeManager({ userId }: { userId: string }) {
 
   const fetchResumes = async () => {
     try {
-      const { data, error } = await supabase
-        .from('resumes')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setResumes((data as Resume[]) || [])
+      const data = await api.getResumes()
+      setResumes((data as unknown as Resume[]) || [])
     } catch (error) {
       console.error('获取简历失败:', error)
     } finally {
@@ -70,51 +64,31 @@ export function ResumeManager({ userId }: { userId: string }) {
     setUploadProgress(0)
 
     try {
-      const filePath = `${userId}/${Date.now()}_${file.name}`
-
-      // 上传到 Supabase Storage
-      const xhr = new XMLHttpRequest()
-      const formData = new FormData()
-      formData.append('file', file)
-
-      // 使用 Supabase client 上传
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('resumes')
-        .upload(filePath, file, { upsert: false })
-
-      if (uploadError) throw uploadError
+      // 上传文件
+      setUploadProgress(30)
+      const { url: fileUrl } = await api.uploadFile(file, 'resumes')
 
       setUploadProgress(80)
 
-      // 获取公开 URL
-      const { data: urlData } = supabase.storage.from('resumes').getPublicUrl(filePath)
-      const fileUrl = urlData.publicUrl
-
       // 保存到数据库
-      const { data: resumeRecord, error: dbError } = await supabase
-        .from('resumes')
-        .insert({
-          user_id: userId,
-          file_name: file.name,
-          file_url: fileUrl,
-          file_type: fileExt.replace('.', ''),
-          file_size: file.size,
-          extracted_text: '',
-        })
-        .select()
-        .single()
-
-      if (dbError) throw dbError
+      const resumeRecord = await api.createResume({
+        file_name: file.name,
+        file_url: fileUrl,
+      })
 
       setUploadProgress(100)
       toast({ title: '上传成功', description: '简历已上传，正在尝试提取文本...' })
 
       // 触发文本提取
+      const token = getToken()
       fetch('/api/resume/extract', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
-          resumeId: resumeRecord.id,
+          resumeId: (resumeRecord as Record<string, unknown>).id,
           fileUrl,
           fileName: file.name,
         }),
@@ -142,15 +116,8 @@ export function ResumeManager({ userId }: { userId: string }) {
 
   const handleDelete = async (resume: Resume) => {
     try {
-      // 删除 Storage 文件
-      const filePath = resume.file_url.split('/resumes/')[1]
-      if (filePath) {
-        await supabase.storage.from('resumes').remove([decodeURIComponent(filePath)])
-      }
-
       // 删除数据库记录
-      const { error } = await supabase.from('resumes').delete().eq('id', resume.id)
-      if (error) throw error
+      await api.deleteResume(resume.id)
 
       toast({ title: '已删除' })
       fetchResumes()
@@ -162,12 +129,8 @@ export function ResumeManager({ userId }: { userId: string }) {
 
   const handleSaveText = async (resumeId: string) => {
     try {
-      const { error } = await supabase
-        .from('resumes')
-        .update({ extracted_text: editText })
-        .eq('id', resumeId)
+      await api.updateResume({ id: resumeId, extracted_text: editText })
 
-      if (error) throw error
       toast({ title: '简历文本已保存' })
       setEditingId(null)
       fetchResumes()

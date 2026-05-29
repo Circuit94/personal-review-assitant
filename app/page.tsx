@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react'
+import { signIn, signUp, verifySession } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -17,6 +17,13 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
 
+  // 如果已登录，直接跳转
+  useEffect(() => {
+    verifySession().then((user) => {
+      if (user) window.location.href = '/dashboard'
+    })
+  }, [])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -25,42 +32,18 @@ export default function Home() {
 
     try {
       if (isLogin) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        })
-
-        if (error) throw error
-
-        if (data.user) {
-          window.location.href = '/dashboard'
-        }
+        await signIn(email, password)
+        window.location.href = '/dashboard'
       } else {
         if (password !== confirmPassword) {
           throw new Error('密码不匹配')
         }
-
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/dashboard`,
-          }
-        })
-
-        if (error) throw error
-
-        if (data.user && data.session) {
-          window.location.href = '/dashboard'
-        } else {
-          setMessage('注册成功！请检查您的邮箱以确认账户。')
-          setEmail('')
-          setPassword('')
-          setConfirmPassword('')
-        }
+        await signUp(email, password)
+        window.location.href = '/dashboard'
       }
-    } catch (err: any) {
-      setError(err.message || '操作失败，请重试')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '操作失败，请重试'
+      setError(message)
     } finally {
       setLoading(false)
     }

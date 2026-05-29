@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
@@ -20,12 +20,7 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
   const fetchAnalyses = async () => {
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('review_analyses')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
+      const data = await api.getReviewAnalyses()
       setAnalyses(data || [])
     } catch (error: any) {
       console.error('获取复盘分析失败:', error)
@@ -42,42 +37,51 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
   const handleGenerateAnalysis = async () => {
     setGenerating(true)
     try {
-      // 1. 获取最近的面试记录和模拟面试记录
-      const { data: interviewRecords } = await supabase
-        .from('interview_records')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(10)
+      // 1. 获取面试记录
+      const interviewRecordsRaw = await api.getInterviewRecords()
+      const interviewRecords = (interviewRecordsRaw || []).slice(0, 10)
 
-      const { data: mockQuestions } = await supabase
-        .from('mock_interview_questions')
-        .select(`
-          question,
-          user_answer,
-          ai_feedback,
-          chat_sessions!inner(user_id)
-        `)
-        .eq('chat_sessions.user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(20)
+      // 2. 获取模拟面试数据
+      const mockSessionsRaw = await api.getChatSessions('mock_interview')
+      const mockSessions = mockSessionsRaw || []
 
-      if ((!interviewRecords || interviewRecords.length === 0) && (!mockQuestions || mockQuestions.length === 0)) {
+      // 3. 对每个 session 获取模拟面试题目
+      let allMockQuestions: any[] = []
+      for (const session of mockSessions) {
+        try {
+          const questions = await api.getMockQuestions(session.id as string)
+          if (questions && questions.length > 0) {
+            allMockQuestions = allMockQuestions.concat(questions)
+          }
+        } catch {
+          // 单个 session 获取失败不中断整体流程
+        }
+      }
+      allMockQuestions = allMockQuestions.slice(0, 20)
+
+      if (interviewRecords.length === 0 && allMockQuestions.length === 0) {
         throw new Error('暂无足够的面试记录或模拟面试数据来进行分析，请先记录面试或开始模拟面试。')
       }
 
-      // 2. 调用 API 生成分析报告
+      // 4. 调用 API 生成分析报告
+      const token = getToken()
       const response = await fetch('/api/generate-review-analysis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interviewRecords, mockQuestions }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ interviewRecords, mockQuestions: allMockQuestions }),
       })
 
-      if (!response.ok) throw new Error('生成分析报告失败')
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.error || '生成分析报告失败')
+      }
       const data = await response.json()
 
-      // 3. 保存分析报告到数据库
-      const { error: dbError } = await supabase.from('review_analyses').insert({
+      // 5. 保存分析报告
+      await api.createReviewAnalysis({
         user_id: userId,
         analysis_type: 'weekly',
         period_start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -87,8 +91,6 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
         weaknesses: data.weaknesses,
         suggestions: data.suggestions,
       })
-
-      if (dbError) throw dbError
 
       toast({ title: '分析报告已生成' })
       fetchAnalyses()

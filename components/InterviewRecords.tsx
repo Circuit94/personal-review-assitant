@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { api } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -31,12 +31,7 @@ export function InterviewRecords({ userId }: { userId: string }) {
   const fetchRecords = async () => {
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('interview_records')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
+      const data = await api.getInterviewRecords()
       setRecords(data || [])
     } catch (error: any) {
       console.error('获取面试记录失败:', error)
@@ -53,16 +48,13 @@ export function InterviewRecords({ userId }: { userId: string }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      const { error } = await supabase.from('interview_records').insert({
-        user_id: userId,
+      await api.createInterviewRecord({
         title,
         content,
         position,
         company,
-        interview_date: date || null,
+        interview_date: date || undefined,
       })
-
-      if (error) throw error
 
       toast({ title: '记录已添加' })
       setOpen(false)
@@ -84,8 +76,7 @@ export function InterviewRecords({ userId }: { userId: string }) {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase.from('interview_records').delete().eq('id', id)
-      if (error) throw error
+      await api.deleteInterviewRecord(id)
       toast({ title: '记录已删除' })
       fetchRecords()
     } catch (error: any) {

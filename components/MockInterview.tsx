@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -24,6 +24,12 @@ interface FeedbackItem {
   feedback: string
 }
 
+// 用于保存 mock question 的数据库记录 id 映射
+// key: question_number (1-based), value: database record id
+interface QuestionRecordMap {
+  [key: number]: string
+}
+
 export function MockInterview({ userId }: { userId: string }) {
   const [position, setPosition] = useState('')
   const [isStarted, setIsStarted] = useState(false)
@@ -35,6 +41,7 @@ export function MockInterview({ userId }: { userId: string }) {
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([])
   const [showFeedback, setShowFeedback] = useState(false)
   const [currentFeedback, setCurrentFeedback] = useState<string | null>(null)
+  const [questionRecordMap, setQuestionRecordMap] = useState<QuestionRecordMap>({})
   const { toast } = useToast()
 
   const handleStartInterview = async () => {
@@ -42,19 +49,17 @@ export function MockInterview({ userId }: { userId: string }) {
     setLoading(true)
     try {
       // 获取简历内容
-      const { data: resumeData } = await supabase
-        .from('resumes')
-        .select('extracted_text')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      const resumeText = resumeData?.[0]?.extracted_text || ''
+      const resumeData = await api.getResumes() as Record<string, unknown>[]
+      const resumeText = (resumeData?.[0]?.extracted_text as string) || ''
 
       // 调用 API 生成题目
+      const token = getToken()
       const response = await fetch('/api/generate-interview-questions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ position, resumeText }),
       })
 
@@ -67,28 +72,31 @@ export function MockInterview({ userId }: { userId: string }) {
       }
 
       // 创建会话记录
-      const { data: session, error: sessionError } = await supabase
-        .from('chat_sessions')
-        .insert({
-          user_id: userId,
-          title: `${position} - 模拟面试`,
-          session_type: 'mock_interview',
-          position,
-        })
-        .select()
-        .single()
-
-      if (sessionError) throw sessionError
-      setSessionId(session.id)
+      const session = await api.createChatSession({
+        title: `${position} - 模拟面试`,
+        session_type: 'mock_interview',
+        position,
+      }) as Record<string, unknown>
+      setSessionId(session.id as string)
 
       // 保存题目到数据库
       const questionInserts = data.questions.map((q: Question, idx: number) => ({
-        session_id: session.id,
+        session_id: session.id as string,
         question_number: idx + 1,
         question: q.question,
       }))
 
-      await supabase.from('mock_interview_questions').insert(questionInserts)
+      const savedQuestions = await api.createMockQuestions({
+        session_id: session.id as string,
+        questions: questionInserts,
+      }) as Record<string, unknown>[]
+
+      // 建立 question_number -> db id 的映射
+      const recordMap: QuestionRecordMap = {}
+      savedQuestions.forEach((q) => {
+        recordMap[q.question_number as number] = q.id as string
+      })
+      setQuestionRecordMap(recordMap)
 
       setIsStarted(true)
       setCurrentIndex(0)
@@ -112,12 +120,17 @@ export function MockInterview({ userId }: { userId: string }) {
       const currentQuestion = questions[currentIndex]
 
       // 调用 AI 获取反馈
+      const token = getToken()
       const response = await fetch('/api/get-interview-feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           question: currentQuestion.question,
           answer: answer.trim(),
+          position,
         }),
       })
 
@@ -125,16 +138,15 @@ export function MockInterview({ userId }: { userId: string }) {
       const data = await response.json()
       const feedback = data.feedback
 
-      // 更新数据库
-      await supabase
-        .from('mock_interview_questions')
-        .update({
+      // 更新数据库中的题目记录
+      const questionRecordId = questionRecordMap[currentIndex + 1]
+      if (questionRecordId) {
+        await api.updateMockQuestion({
+          id: questionRecordId,
           user_answer: answer.trim(),
           ai_feedback: feedback,
-          answered_at: new Date().toISOString(),
         })
-        .eq('session_id', sessionId)
-        .eq('question_number', currentIndex + 1)
+      }
 
       // 保存反馈并展示
       const newFeedback: FeedbackItem = {

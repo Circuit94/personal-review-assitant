@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -34,20 +34,14 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
 
   const fetchRecords = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('interview_audio_records')
-        .select('*')
-        .eq('user_id', userId) // 添加用户过滤
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setRecords((data as AudioRecord[]) || [])
+      const data = await api.getAudioRecords()
+      setRecords((data as unknown as AudioRecord[]) || [])
     } catch (error) {
       console.error('获取音频记录失败:', error)
     } finally {
       setLoading(false)
     }
-  }, [userId])
+  }, [])
 
   useEffect(() => {
     fetchRecords()
@@ -172,39 +166,49 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
     setUploadProgress(0)
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('userId', userId)
-      formData.append('title', file.name.split('.')[0])
+      // 1. 上传文件获取 URL
+      setUploadProgress(10)
+      const { url: fileUrl, fileName } = await api.uploadFile(file, 'audio')
+      setUploadProgress(50)
 
-      const xhr = new XMLHttpRequest()
-
-      const promise = new Promise<void>((resolve, reject) => {
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            setUploadProgress(Math.round((event.loaded / event.total) * 100))
-          }
-        }
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve()
-          else {
-            try {
-              const err = JSON.parse(xhr.responseText)
-              reject(new Error(err.error || '上传失败'))
-            } catch {
-              reject(new Error('上传失败'))
-            }
-          }
-        }
-        xhr.onerror = () => reject(new Error('网络请求出错'))
-        xhr.ontimeout = () => reject(new Error('上传超时'))
+      // 2. 创建音频记录（调用 /api/audio/upload）
+      const token = getToken()
+      const uploadRes = await fetch('/api/audio/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ fileUrl, fileName }),
       })
 
-      xhr.open('POST', '/api/audio/upload')
-      xhr.timeout = 600000
-      xhr.send(formData)
-      await promise
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json().catch(() => ({}))
+        throw new Error(errData.error || '创建音频记录失败')
+      }
 
+      const uploadData = await uploadRes.json()
+      setUploadProgress(70)
+
+      // 3. 触发后台处理（调用 /api/audio/process）
+      const recordId = uploadData.record?.id || uploadData.id
+      if (recordId) {
+        const processRes = await fetch('/api/audio/process', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ recordId }),
+        })
+
+        if (!processRes.ok) {
+          const errData = await processRes.json().catch(() => ({}))
+          throw new Error(errData.error || '触发处理失败')
+        }
+      }
+
+      setUploadProgress(100)
       toast({ title: '上传成功', description: '正在后台进行转写与智能分析...' })
       fetchRecords()
     } catch (error: unknown) {

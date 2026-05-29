@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server'
 import { openai, MODEL } from '@/lib/openai'
-import { supabaseAdmin } from '@/lib/supabase/server'
+import { getUserFromRequest } from '@/lib/auth'
 import { checkRateLimit } from '@/lib/rate-limit'
+import db from '@/lib/db'
 
 export async function POST(req: Request) {
   try {
+    const user = getUserFromRequest(req)
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
+
     // 速率限制
-    const ip = req.headers.get('x-forwarded-for') || 'unknown'
-    const { allowed } = checkRateLimit(`resume-extract:${ip}`, { maxRequests: 10, windowMs: 300000 })
+    const { allowed } = checkRateLimit(`resume-extract:${user.id}`, { maxRequests: 10, windowMs: 300000 })
     if (!allowed) {
       return NextResponse.json({ error: '请求过于频繁，请稍后重试' }, { status: 429 })
     }
@@ -18,8 +21,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 })
     }
 
-    // 下载文件内容
-    const fileRes = await fetch(fileUrl)
+    // 验证简历属于当前用户
+    const existing = db.prepare('SELECT id FROM resumes WHERE id = ? AND user_id = ?').get(resumeId, user.id)
+    if (!existing) return NextResponse.json({ error: '简历不存在' }, { status: 404 })
+
+    // 下载文件内容（本地文件需要拼接完整 URL）
+    const fullUrl = fileUrl.startsWith('/') ? `http://localhost:${process.env.PORT || 3000}${fileUrl}` : fileUrl
+    const fileRes = await fetch(fullUrl)
     if (!fileRes.ok) throw new Error('无法下载简历文件')
 
     const fileBuffer = await fileRes.arrayBuffer()
@@ -53,16 +61,16 @@ export async function POST(req: Request) {
 
       extractedText = response.choices[0].message.content || ''
     } else if (['pdf', 'docx', 'doc'].includes(fileExt)) {
-      // PDF/DOCX：提示用户手动粘贴（生产环境应使用 pdf-parse / mammoth）
       extractedText = `[文件已上传: ${fileName}] 请在下方文本框中粘贴简历文本内容，以获得更精准的面试题目生成和分析。`
     }
 
     // 更新数据库
     if (extractedText) {
-      await supabaseAdmin
-        .from('resumes')
-        .update({ extracted_text: extractedText.slice(0, 10000) })
-        .eq('id', resumeId)
+      db.prepare("UPDATE resumes SET extracted_text = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(
+        extractedText.slice(0, 10000),
+        resumeId,
+        user.id
+      )
     }
 
     return NextResponse.json({ success: true, extractedText: extractedText.slice(0, 500) })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { api } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
@@ -34,27 +34,18 @@ export function AIChat({ userId }: { userId: string }) {
   const initSession = async () => {
     try {
       // 查找或创建聊天会话
-      const { data: existingSession } = await supabase
-        .from('chat_sessions')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('session_type', 'chat')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
+      const sessions = await api.getChatSessions('chat') as Record<string, unknown>[]
 
-      if (existingSession) {
-        setSessionId(existingSession.id)
-        await loadMessages(existingSession.id)
+      if (sessions && sessions.length > 0) {
+        const existingSession = sessions[0]
+        setSessionId(existingSession.id as string)
+        await loadMessages(existingSession.id as string)
       } else {
-        const { data: newSession, error } = await supabase
-          .from('chat_sessions')
-          .insert({ user_id: userId, title: 'AI 面试辅导', session_type: 'chat' })
-          .select()
-          .single()
-
-        if (error) throw error
-        setSessionId(newSession.id)
+        const newSession = await api.createChatSession({
+          title: 'AI 面试辅导',
+          session_type: 'chat',
+        }) as Record<string, unknown>
+        setSessionId(newSession.id as string)
       }
     } catch (error) {
       console.error('Init session error:', error)
@@ -62,13 +53,10 @@ export function AIChat({ userId }: { userId: string }) {
   }
 
   const loadMessages = async (sid: string) => {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('session_id', sid)
-      .order('created_at', { ascending: true })
-
-    if (data) setMessages(data)
+    const data = await api.getChatMessages(sid) as Record<string, unknown>[]
+    if (data) {
+      setMessages(data as unknown as ChatMessage[])
+    }
   }
 
   const handleSend = async () => {
@@ -90,7 +78,7 @@ export function AIChat({ userId }: { userId: string }) {
 
     try {
       // 保存用户消息到数据库
-      await supabase.from('chat_messages').insert({
+      await api.createChatMessage({
         session_id: sessionId,
         role: 'user',
         content: userMessage,
@@ -100,21 +88,12 @@ export function AIChat({ userId }: { userId: string }) {
       setStreaming(true)
       setStreamingContent('')
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages.slice(-18), { role: 'user', content: userMessage }].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'AI 响应失败')
-      }
+      const response = await api.chat(
+        [...messages.slice(-18), { role: 'user', content: userMessage }].map((m) => ({
+          role: m.role,
+          content: m.content,
+        }))
+      )
 
       // 处理 SSE 流式响应
       const reader = response.body?.getReader()
@@ -153,7 +132,7 @@ export function AIChat({ userId }: { userId: string }) {
 
       // 保存 AI 回复到数据库
       if (fullContent) {
-        await supabase.from('chat_messages').insert({
+        await api.createChatMessage({
           session_id: sessionId,
           role: 'assistant',
           content: fullContent,

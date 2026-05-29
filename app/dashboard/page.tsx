@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { verifySession, signOut, api, User } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AIChat } from '@/components/AIChat'
@@ -10,6 +10,7 @@ import { ResumeManager } from '@/components/ResumeManager'
 import { InterviewRecords } from '@/components/InterviewRecords'
 import { ReviewAnalysis } from '@/components/ReviewAnalysis'
 import { AudioInterviewSystem } from '@/components/AudioInterviewSystem'
+import { PersonalInfoBank } from '@/components/PersonalInfoBank'
 import {
   LogOut,
   MessageSquare,
@@ -22,6 +23,7 @@ import {
   Upload,
   Brain,
   TrendingUp,
+  Database,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -33,7 +35,7 @@ interface DashboardStats {
 }
 
 export default function Dashboard() {
-  const [user, setUser] = useState<{ id: string; email?: string } | null>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
   const [stats, setStats] = useState<DashboardStats>({
@@ -49,51 +51,34 @@ export default function Dashboard() {
   }, [])
 
   const checkUser = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
+    const user = await verifySession()
     if (!user) {
       window.location.href = '/'
       return
     }
-
     setUser(user)
     setLoading(false)
-    await loadStats(user.id)
+    await loadStats()
   }
 
-  const loadStats = async (uid: string) => {
+  const loadStats = async () => {
     try {
-      const [resumes, interviews, mocks, audios] = await Promise.all([
-        supabase.from('resumes').select('id', { count: 'exact', head: true }).eq('user_id', uid),
-        supabase.from('interview_records').select('id', { count: 'exact', head: true }).eq('user_id', uid),
-        supabase
-          .from('chat_sessions')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', uid)
-          .eq('session_type', 'mock_interview'),
-        supabase.from('interview_audio_records').select('id', { count: 'exact', head: true }).eq('user_id', uid),
-      ])
-
+      const data = await api.getStats()
       const newStats = {
-        resumeCount: resumes.count || 0,
-        interviewCount: interviews.count || 0,
-        mockCount: mocks.count || 0,
-        audioCount: audios.count || 0,
+        resumeCount: data.resumes,
+        interviewCount: data.interviews,
+        mockCount: data.chats,
+        audioCount: data.audios,
       }
       setStats(newStats)
-
-      // 判断是否新用户（所有数据为 0）
       setIsNewUser(Object.values(newStats).every((v) => v === 0))
     } catch (error) {
       console.error('Load stats error:', error)
     }
   }
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    window.location.href = '/'
+  const handleSignOut = () => {
+    signOut()
   }
 
   if (loading) {
@@ -130,64 +115,47 @@ export default function Dashboard() {
 
       <main className="max-w-7xl mx-auto p-4 sm:p-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 sm:space-y-8">
-          {/* 响应式 Tab 导航 */}
           <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
             <TabsList className="bg-white dark:bg-gray-800 border shadow-sm h-10 sm:h-12 p-1 inline-flex w-auto min-w-full sm:min-w-0">
-              <TabsTrigger
-                value="overview"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="overview" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <LayoutDashboard className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">概览</span>
                 <span className="sm:hidden">首页</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="chat"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="chat" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <MessageSquare className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">AI 聊天</span>
                 <span className="sm:hidden">聊天</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="mock"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="mock" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <Play className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">模拟面试</span>
                 <span className="sm:hidden">模拟</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="resume"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="resume" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <FileText className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">简历管理</span>
                 <span className="sm:hidden">简历</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="records"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="records" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <History className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">面试记录</span>
                 <span className="sm:hidden">记录</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="audio"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="audio" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <Mic className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">录音分析</span>
                 <span className="sm:hidden">录音</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="analysis"
-                className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm"
-              >
+              <TabsTrigger value="analysis" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <BarChart3 className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">复盘分析</span>
                 <span className="sm:hidden">复盘</span>
+              </TabsTrigger>
+              <TabsTrigger value="infobank" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
+                <Database className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">信息库</span>
+                <span className="sm:hidden">信息</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -195,43 +163,27 @@ export default function Dashboard() {
           {/* 概览页 */}
           <TabsContent value="overview" className="mt-0">
             <div className="space-y-6">
-              {/* 新用户引导 */}
               {isNewUser && (
                 <Card className="bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200">
                   <CardContent className="pt-6">
                     <h3 className="font-bold text-amber-800 mb-3">🎯 快速开始指南</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div
-                        className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors"
-                        onClick={() => setActiveTab('resume')}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm shrink-0">
-                          1
-                        </div>
+                      <div className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors" onClick={() => setActiveTab('resume')}>
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm shrink-0">1</div>
                         <div>
                           <p className="text-sm font-medium">上传简历</p>
                           <p className="text-xs text-muted-foreground">AI 将基于简历生成针对性题目</p>
                         </div>
                       </div>
-                      <div
-                        className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors"
-                        onClick={() => setActiveTab('mock')}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-bold text-sm shrink-0">
-                          2
-                        </div>
+                      <div className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors" onClick={() => setActiveTab('mock')}>
+                        <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-bold text-sm shrink-0">2</div>
                         <div>
                           <p className="text-sm font-medium">模拟面试</p>
                           <p className="text-xs text-muted-foreground">AI 面试官实时提问和反馈</p>
                         </div>
                       </div>
-                      <div
-                        className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors"
-                        onClick={() => setActiveTab('analysis')}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold text-sm shrink-0">
-                          3
-                        </div>
+                      <div className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors" onClick={() => setActiveTab('analysis')}>
+                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold text-sm shrink-0">3</div>
                         <div>
                           <p className="text-sm font-medium">复盘分析</p>
                           <p className="text-xs text-muted-foreground">生成周度报告追踪进步</p>
@@ -242,7 +194,6 @@ export default function Dashboard() {
                 </Card>
               )}
 
-              {/* 数据统计卡片 */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('resume')}>
                   <CardContent className="pt-6">
@@ -290,67 +241,40 @@ export default function Dashboard() {
                 </Card>
               </div>
 
-              {/* 主内容区 */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-6 sm:p-8 rounded-2xl shadow-lg">
-                    <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">
-                      欢迎回来，准备好迎接下一次面试了吗？
-                    </h2>
-                    <p className="text-blue-100 mb-4 sm:mb-6 text-sm sm:text-lg">
-                      面试助手帮助您优化简历、模拟面试场景，并提供深度复盘分析。
-                    </p>
+                    <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">欢迎回来，准备好迎接下一次面试了吗？</h2>
+                    <p className="text-blue-100 mb-4 sm:mb-6 text-sm sm:text-lg">面试助手帮助您优化简历、模拟面试场景，并提供深度复盘分析。</p>
                     <div className="flex flex-wrap gap-3">
-                      <Button
-                        variant="secondary"
-                        onClick={() => setActiveTab('mock')}
-                        className="h-10 sm:h-11 px-4 sm:px-8 font-semibold"
-                      >
-                        <Play className="mr-2 h-4 w-4" />
-                        开始模拟面试
+                      <Button variant="secondary" onClick={() => setActiveTab('mock')} className="h-10 sm:h-11 px-4 sm:px-8 font-semibold">
+                        <Play className="mr-2 h-4 w-4" />开始模拟面试
                       </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => setActiveTab('chat')}
-                        className="h-10 sm:h-11 px-4 sm:px-8 font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20"
-                      >
-                        <MessageSquare className="mr-2 h-4 w-4" />
-                        AI 辅导
+                      <Button variant="outline" onClick={() => setActiveTab('chat')} className="h-10 sm:h-11 px-4 sm:px-8 font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20">
+                        <MessageSquare className="mr-2 h-4 w-4" />AI 辅导
                       </Button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div
-                      className="p-5 sm:p-6 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer"
-                      onClick={() => setActiveTab('audio')}
-                    >
+                    <div className="p-5 sm:p-6 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('audio')}>
                       <Mic className="h-7 w-7 sm:h-8 sm:w-8 text-orange-500 mb-3 sm:mb-4" />
                       <h3 className="font-bold text-base sm:text-lg">录音智能分析</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground mt-2">
-                        上传面试录音，AI 自动转写并多维度分析表现。
-                      </p>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-2">上传面试录音，AI 自动转写并多维度分析表现。</p>
                     </div>
-                    <div
-                      className="p-5 sm:p-6 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer"
-                      onClick={() => setActiveTab('analysis')}
-                    >
+                    <div className="p-5 sm:p-6 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('analysis')}>
                       <TrendingUp className="h-7 w-7 sm:h-8 sm:w-8 text-green-500 mb-3 sm:mb-4" />
                       <h3 className="font-bold text-base sm:text-lg">智能复盘</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground mt-2">
-                        基于历史记录，智能生成周度复盘报告和提升建议。
-                      </p>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-2">基于历史记录，智能生成周度复盘报告和提升建议。</p>
                     </div>
                   </div>
                 </div>
 
-                {/* 侧边栏 */}
                 <div className="space-y-6">
                   <Card>
                     <CardContent className="pt-6">
                       <h3 className="font-bold mb-4 flex items-center text-sm">
-                        <TrendingUp className="mr-2 h-4 w-4 text-blue-600" />
-                        使用建议
+                        <TrendingUp className="mr-2 h-4 w-4 text-blue-600" />使用建议
                       </h3>
                       <div className="space-y-3 text-xs text-muted-foreground">
                         {stats.resumeCount === 0 && (
@@ -388,25 +312,23 @@ export default function Dashboard() {
           <TabsContent value="chat" className="mt-0">
             <AIChat userId={user!.id} />
           </TabsContent>
-
           <TabsContent value="mock" className="mt-0">
             <MockInterview userId={user!.id} />
           </TabsContent>
-
           <TabsContent value="resume" className="mt-0">
             <ResumeManager userId={user!.id} />
           </TabsContent>
-
           <TabsContent value="records" className="mt-0">
             <InterviewRecords userId={user!.id} />
           </TabsContent>
-
           <TabsContent value="audio" className="mt-0">
             <AudioInterviewSystem userId={user!.id} />
           </TabsContent>
-
           <TabsContent value="analysis" className="mt-0">
             <ReviewAnalysis userId={user!.id} />
+          </TabsContent>
+          <TabsContent value="infobank" className="mt-0">
+            <PersonalInfoBank userId={user!.id} />
           </TabsContent>
         </Tabs>
       </main>

@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server'
 import { openai, MODEL } from '@/lib/openai'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { validateMessages } from '@/lib/validate'
+import { verifyToken } from '@/lib/auth'
+import db from '@/lib/db'
 
-const SYSTEM_PROMPT = `你是一位资深面试辅导专家，拥有 10 年以上人力资源和面试培训经验，曾帮助数千名候选人成功拿到 offer。
+const BASE_SYSTEM_PROMPT = `你是一位资深面试辅导专家，拥有 10 年以上人力资源和面试培训经验，曾帮助数千名候选人成功拿到 offer。
 
 ## 你的核心能力
 - 简历优化：结构、措辞、量化成果
@@ -23,6 +25,88 @@ const SYSTEM_PROMPT = `你是一位资深面试辅导专家，拥有 10 年以�
 - 适当使用具体数据和案例增强说服力
 - 每次回答控制在合理长度，重点突出，避免冗长的废话`
 
+/**
+ * 获取用户的个性化上下文（简历 + 面试记录 + 个人信息）
+ */
+function getUserContext(userId: string): string {
+  const contextParts: string[] = []
+
+  try {
+    // 1. 获取简历摘要
+    const resume = db.prepare(
+      'SELECT extracted_text FROM resumes WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1'
+    ).get(userId) as Record<string, unknown> | undefined
+
+    if (resume?.extracted_text) {
+      const resumeText = (resume.extracted_text as string).slice(0, 1500)
+      contextParts.push(`## 用户简历摘要\n${resumeText}`)
+    }
+
+    // 2. 获取最近的面试记录（最近5条）
+    const interviews = db.prepare(
+      `SELECT title, company, position, interview_date, content 
+       FROM interview_records 
+       WHERE user_id = ? 
+       ORDER BY interview_date DESC 
+       LIMIT 5`
+    ).all(userId) as Record<string, unknown>[]
+
+    if (interviews.length > 0) {
+      const interviewSummary = interviews.map((r) => {
+        const parts = [
+          r.company ? `公司: ${r.company}` : '',
+          r.position ? `岗位: ${r.position}` : '',
+          r.interview_date ? `日期: ${r.interview_date}` : '',
+          r.title ? `标题: ${r.title}` : '',
+        ].filter(Boolean).join(' | ')
+        return `- ${parts}`
+      }).join('\n')
+      contextParts.push(`## 最近面试记录\n${interviewSummary}`)
+    }
+
+    // 3. 获取个人信息库关键字段
+    const infoFields = db.prepare(
+      `SELECT m.name as module_name, f.label, f.value 
+       FROM info_fields f 
+       JOIN info_modules m ON f.module_id = m.id 
+       WHERE f.user_id = ? AND f.value != '' 
+       ORDER BY m.sort_order, f.sort_order 
+       LIMIT 20`
+    ).all(userId) as Record<string, unknown>[]
+
+    if (infoFields.length > 0) {
+      const infoSummary = infoFields.map((f) => 
+        `- [${f.module_name}] ${f.label}: ${(f.value as string).slice(0, 200)}`
+      ).join('\n')
+      contextParts.push(`## 用户个人信息\n${infoSummary}`)
+    }
+
+    // 4. 获取模拟面试中的薄弱点（最近的 AI 反馈）
+    const recentFeedback = db.prepare(
+      `SELECT q.question, q.ai_feedback 
+       FROM mock_interview_questions q 
+       JOIN chat_sessions s ON q.session_id = s.id 
+       WHERE s.user_id = ? AND q.ai_feedback IS NOT NULL 
+       ORDER BY q.created_at DESC 
+       LIMIT 3`
+    ).all(userId) as Record<string, unknown>[]
+
+    if (recentFeedback.length > 0) {
+      const feedbackSummary = recentFeedback.map((f) =>
+        `- 问题: ${(f.question as string).slice(0, 80)}\n  反馈: ${(f.ai_feedback as string).slice(0, 150)}`
+      ).join('\n')
+      contextParts.push(`## 最近模拟面试反馈（薄弱点参考）\n${feedbackSummary}`)
+    }
+  } catch (error) {
+    console.error('Failed to load user context:', error)
+    // 上下文加载失败不影响主流程
+  }
+
+  if (contextParts.length === 0) return ''
+
+  return `\n\n---\n## 以下是该用户的个人背景信息（请据此提供个性化建议，但不要主动复述这些信息）\n\n${contextParts.join('\n\n')}`
+}
+
 export async function POST(req: Request) {
   try {
     // 速率限制（基于 IP）
@@ -38,13 +122,30 @@ export async function POST(req: Request) {
     const body = await req.json()
     const messages = validateMessages(body.messages)
 
+    // 尝试获取用户身份以加载个性化上下文
+    let userContext = ''
+    const authHeader = req.headers.get('authorization')
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7)
+      try {
+        const payload = verifyToken(token)
+        if (payload?.id) {
+          userContext = getUserContext(payload.id)
+        }
+      } catch {
+        // token 无效不影响聊天，只是没有个性化上下文
+      }
+    }
+
+    const systemPrompt = BASE_SYSTEM_PROMPT + userContext
+
     // 截断历史消息，保留最近 20 条以避免超出上下文窗口
     const truncatedMessages = messages.slice(-20)
 
     const response = await openai.chat.completions.create({
       model: MODEL,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         ...truncatedMessages,
       ],
       stream: true,

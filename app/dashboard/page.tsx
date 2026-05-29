@@ -11,6 +11,7 @@ import { InterviewRecords } from '@/components/InterviewRecords'
 import { ReviewAnalysis } from '@/components/ReviewAnalysis'
 import { AudioInterviewSystem } from '@/components/AudioInterviewSystem'
 import { PersonalInfoBank } from '@/components/PersonalInfoBank'
+import { InterviewSprint } from '@/components/InterviewSprint'
 import {
   LogOut,
   MessageSquare,
@@ -24,6 +25,7 @@ import {
   Brain,
   TrendingUp,
   Database,
+  Zap,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -32,6 +34,106 @@ interface DashboardStats {
   interviewCount: number
   mockCount: number
   audioCount: number
+}
+
+function getReadinessScore(stats: DashboardStats): number {
+  let score = 0
+  // 简历 (25分)
+  if (stats.resumeCount > 0) score += 25
+  // 模拟面试 (35分，每次+7，最多35)
+  score += Math.min(stats.mockCount * 7, 35)
+  // 面试记录 (20分，每条+5，最多20)
+  score += Math.min(stats.interviewCount * 5, 20)
+  // 录音分析 (20分，每条+10，最多20)
+  score += Math.min(stats.audioCount * 10, 20)
+  return Math.min(score, 100)
+}
+
+function getReadinessMessage(stats: DashboardStats): string {
+  const score = getReadinessScore(stats)
+  if (score === 0) return '开始你的面试准备之旅吧！上传简历是第一步。'
+  if (score < 30) return '刚刚起步，建议先上传简历并完成一次模拟面试。'
+  if (score < 60) return '准备进行中，继续模拟面试和记录复盘可以快速提升。'
+  if (score < 85) return '准备得不错！保持练习频率，关注薄弱环节。'
+  return '准备充分！你已经做了大量练习，自信地迎接面试吧！'
+}
+
+interface RecommendedAction {
+  title: string
+  description: string
+  tab: string
+  icon: React.ReactNode
+  iconBg: string
+  borderColor: string
+}
+
+function getRecommendedActions(stats: DashboardStats): RecommendedAction[] {
+  const actions: RecommendedAction[] = []
+
+  if (stats.resumeCount === 0) {
+    actions.push({
+      title: '上传简历',
+      description: 'AI 将基于简历生成针对性面试题',
+      tab: 'resume',
+      icon: <FileText className="h-5 w-5 text-blue-600" />,
+      iconBg: 'bg-blue-100',
+      borderColor: 'border-l-blue-500',
+    })
+  }
+
+  if (stats.mockCount < 3) {
+    actions.push({
+      title: '完成模拟面试',
+      description: `已完成 ${stats.mockCount} 次，建议至少 3 次`,
+      tab: 'mock',
+      icon: <Play className="h-5 w-5 text-green-600" />,
+      iconBg: 'bg-green-100',
+      borderColor: 'border-l-green-500',
+    })
+  }
+
+  if (stats.interviewCount === 0) {
+    actions.push({
+      title: '记录面试经历',
+      description: '用看板追踪面试进度和复盘',
+      tab: 'records',
+      icon: <History className="h-5 w-5 text-purple-600" />,
+      iconBg: 'bg-purple-100',
+      borderColor: 'border-l-purple-500',
+    })
+  }
+
+  // 如果基础都完成了，推荐进阶动作
+  if (actions.length === 0) {
+    actions.push(
+      {
+        title: '面试冲刺准备',
+        description: '为即将到来的面试生成 30 分钟清单',
+        tab: 'sprint',
+        icon: <Zap className="h-5 w-5 text-amber-600" />,
+        iconBg: 'bg-amber-100',
+        borderColor: 'border-l-amber-500',
+      },
+      {
+        title: '继续模拟面试',
+        description: '保持手感，挑战更高难度',
+        tab: 'mock',
+        icon: <Brain className="h-5 w-5 text-green-600" />,
+        iconBg: 'bg-green-100',
+        borderColor: 'border-l-green-500',
+      },
+      {
+        title: '生成复盘报告',
+        description: '分析进步趋势和薄弱环节',
+        tab: 'analysis',
+        icon: <TrendingUp className="h-5 w-5 text-indigo-600" />,
+        iconBg: 'bg-indigo-100',
+        borderColor: 'border-l-indigo-500',
+      },
+    )
+  }
+
+  return actions.slice(0, 3)
 }
 
 export default function Dashboard() {
@@ -44,8 +146,6 @@ export default function Dashboard() {
     mockCount: 0,
     audioCount: 0,
   })
-  const [isNewUser, setIsNewUser] = useState(false)
-
   useEffect(() => {
     checkUser()
   }, [])
@@ -64,14 +164,12 @@ export default function Dashboard() {
   const loadStats = async () => {
     try {
       const data = await api.getStats()
-      const newStats = {
+      setStats({
         resumeCount: data.resumes,
         interviewCount: data.interviews,
         mockCount: data.chats,
         audioCount: data.audios,
-      }
-      setStats(newStats)
-      setIsNewUser(Object.values(newStats).every((v) => v === 0))
+      })
     } catch (error) {
       console.error('Load stats error:', error)
     }
@@ -152,6 +250,11 @@ export default function Dashboard() {
                 <span className="hidden sm:inline">复盘分析</span>
                 <span className="sm:hidden">复盘</span>
               </TabsTrigger>
+              <TabsTrigger value="sprint" className="data-[state=active]:bg-amber-50 data-[state=active]:text-amber-600 px-3 sm:px-6 text-xs sm:text-sm">
+                <Zap className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">面试冲刺</span>
+                <span className="sm:hidden">冲刺</span>
+              </TabsTrigger>
               <TabsTrigger value="infobank" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <Database className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">信息库</span>
@@ -160,150 +263,122 @@ export default function Dashboard() {
             </TabsList>
           </div>
 
-          {/* 概览页 */}
+          {/* 概览页 - 任务导向 */}
           <TabsContent value="overview" className="mt-0">
             <div className="space-y-6">
-              {isNewUser && (
-                <Card className="bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200">
-                  <CardContent className="pt-6">
-                    <h3 className="font-bold text-amber-800 mb-3">🎯 快速开始指南</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors" onClick={() => setActiveTab('resume')}>
-                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm shrink-0">1</div>
-                        <div>
-                          <p className="text-sm font-medium">上传简历</p>
-                          <p className="text-xs text-muted-foreground">AI 将基于简历生成针对性题目</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors" onClick={() => setActiveTab('mock')}>
-                        <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-bold text-sm shrink-0">2</div>
-                        <div>
-                          <p className="text-sm font-medium">模拟面试</p>
-                          <p className="text-xs text-muted-foreground">AI 面试官实时提问和反馈</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-3 p-3 bg-white/60 rounded-lg cursor-pointer hover:bg-white/80 transition-colors" onClick={() => setActiveTab('analysis')}>
-                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold text-sm shrink-0">3</div>
-                        <div>
-                          <p className="text-sm font-medium">复盘分析</p>
-                          <p className="text-xs text-muted-foreground">生成周度报告追踪进步</p>
-                        </div>
-                      </div>
+              {/* 面试准备度评分 */}
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-6 sm:p-8 rounded-2xl shadow-lg">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold mb-2">面试准备度</h2>
+                    <p className="text-blue-100 text-sm">
+                      {getReadinessMessage(stats)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-center">
+                      <div className="text-4xl sm:text-5xl font-bold">{getReadinessScore(stats)}</div>
+                      <div className="text-xs text-blue-200 mt-1">/ 100 分</div>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
+                  </div>
+                </div>
+                {/* 准备度进度条 */}
+                <div className="mt-4 w-full h-2 bg-white/20 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-white/80 rounded-full transition-all duration-500"
+                    style={{ width: `${getReadinessScore(stats)}%` }}
+                  />
+                </div>
+              </div>
 
+              {/* 推荐下一步动作 */}
+              <div>
+                <h3 className="text-lg font-bold mb-3">📋 推荐下一步</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {getRecommendedActions(stats).map((action, idx) => (
+                    <Card
+                      key={idx}
+                      className={`cursor-pointer hover:shadow-md transition-all border-l-4 ${action.borderColor}`}
+                      onClick={() => setActiveTab(action.tab)}
+                    >
+                      <CardContent className="py-4 flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${action.iconBg}`}>
+                          {action.icon}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{action.title}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{action.description}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+
+              {/* 数据概览 */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('resume')}>
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-xs text-muted-foreground">简历数</p>
+                        <p className="text-xs text-muted-foreground">简历</p>
                         <p className="text-2xl font-bold">{stats.resumeCount}</p>
                       </div>
-                      <Upload className="h-8 w-8 text-blue-500 opacity-50" />
+                      <Upload className="h-7 w-7 text-blue-500 opacity-50" />
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('mock')}>
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs text-muted-foreground">模拟面试</p>
                         <p className="text-2xl font-bold">{stats.mockCount}</p>
                       </div>
-                      <Brain className="h-8 w-8 text-green-500 opacity-50" />
+                      <Brain className="h-7 w-7 text-green-500 opacity-50" />
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('records')}>
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs text-muted-foreground">面试记录</p>
                         <p className="text-2xl font-bold">{stats.interviewCount}</p>
                       </div>
-                      <History className="h-8 w-8 text-purple-500 opacity-50" />
+                      <History className="h-7 w-7 text-purple-500 opacity-50" />
                     </div>
                   </CardContent>
                 </Card>
                 <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('audio')}>
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs text-muted-foreground">录音分析</p>
                         <p className="text-2xl font-bold">{stats.audioCount}</p>
                       </div>
-                      <Mic className="h-8 w-8 text-orange-500 opacity-50" />
+                      <Mic className="h-7 w-7 text-orange-500 opacity-50" />
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
-                  <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-6 sm:p-8 rounded-2xl shadow-lg">
-                    <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">欢迎回来，准备好迎接下一次面试了吗？</h2>
-                    <p className="text-blue-100 mb-4 sm:mb-6 text-sm sm:text-lg">面试助手帮助您优化简历、模拟面试场景，并提供深度复盘分析。</p>
-                    <div className="flex flex-wrap gap-3">
-                      <Button variant="secondary" onClick={() => setActiveTab('mock')} className="h-10 sm:h-11 px-4 sm:px-8 font-semibold">
-                        <Play className="mr-2 h-4 w-4" />开始模拟面试
-                      </Button>
-                      <Button variant="outline" onClick={() => setActiveTab('chat')} className="h-10 sm:h-11 px-4 sm:px-8 font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20">
-                        <MessageSquare className="mr-2 h-4 w-4" />AI 辅导
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="p-5 sm:p-6 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('audio')}>
-                      <Mic className="h-7 w-7 sm:h-8 sm:w-8 text-orange-500 mb-3 sm:mb-4" />
-                      <h3 className="font-bold text-base sm:text-lg">录音智能分析</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground mt-2">上传面试录音，AI 自动转写并多维度分析表现。</p>
-                    </div>
-                    <div className="p-5 sm:p-6 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('analysis')}>
-                      <TrendingUp className="h-7 w-7 sm:h-8 sm:w-8 text-green-500 mb-3 sm:mb-4" />
-                      <h3 className="font-bold text-base sm:text-lg">智能复盘</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground mt-2">基于历史记录，智能生成周度复盘报告和提升建议。</p>
-                    </div>
-                  </div>
+              {/* 快捷入口 */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-5 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('sprint')}>
+                  <Zap className="h-7 w-7 text-amber-500 mb-3" />
+                  <h3 className="font-bold">面试冲刺</h3>
+                  <p className="text-xs text-muted-foreground mt-1">30 分钟快速准备，AI 定制清单</p>
                 </div>
-
-                <div className="space-y-6">
-                  <Card>
-                    <CardContent className="pt-6">
-                      <h3 className="font-bold mb-4 flex items-center text-sm">
-                        <TrendingUp className="mr-2 h-4 w-4 text-blue-600" />使用建议
-                      </h3>
-                      <div className="space-y-3 text-xs text-muted-foreground">
-                        {stats.resumeCount === 0 && (
-                          <div className="flex items-start gap-2 p-2 bg-amber-50 rounded-lg">
-                            <span className="text-amber-500">💡</span>
-                            <p>上传简历可以让 AI 生成更有针对性的面试题目</p>
-                          </div>
-                        )}
-                        {stats.mockCount < 3 && (
-                          <div className="flex items-start gap-2 p-2 bg-blue-50 rounded-lg">
-                            <span className="text-blue-500">🎯</span>
-                            <p>建议每周至少完成 3 次模拟面试以保持状态</p>
-                          </div>
-                        )}
-                        {stats.audioCount === 0 && (
-                          <div className="flex items-start gap-2 p-2 bg-green-50 rounded-lg">
-                            <span className="text-green-500">🎙️</span>
-                            <p>上传真实面试录音可以获得最精准的复盘分析</p>
-                          </div>
-                        )}
-                        {stats.resumeCount > 0 && stats.mockCount >= 3 && (
-                          <div className="flex items-start gap-2 p-2 bg-purple-50 rounded-lg">
-                            <span className="text-purple-500">🏆</span>
-                            <p>你的准备很充分！试试生成复盘报告看看进步趋势</p>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
+                <div className="p-5 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('mock')}>
+                  <Play className="h-7 w-7 text-green-500 mb-3" />
+                  <h3 className="font-bold">模拟面试</h3>
+                  <p className="text-xs text-muted-foreground mt-1">AI 面试官多轮追问，真实模拟</p>
+                </div>
+                <div className="p-5 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('chat')}>
+                  <MessageSquare className="h-7 w-7 text-blue-500 mb-3" />
+                  <h3 className="font-bold">AI 辅导</h3>
+                  <p className="text-xs text-muted-foreground mt-1">个性化面试辅导，基于你的简历</p>
                 </div>
               </div>
             </div>
@@ -326,6 +401,9 @@ export default function Dashboard() {
           </TabsContent>
           <TabsContent value="analysis" className="mt-0">
             <ReviewAnalysis userId={user!.id} />
+          </TabsContent>
+          <TabsContent value="sprint" className="mt-0">
+            <InterviewSprint userId={user!.id} />
           </TabsContent>
           <TabsContent value="infobank" className="mt-0">
             <PersonalInfoBank userId={user!.id} />

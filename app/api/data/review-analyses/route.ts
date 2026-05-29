@@ -17,6 +17,7 @@ export async function GET(req: Request) {
     strengths: a.strengths ? JSON.parse(a.strengths) : [],
     weaknesses: a.weaknesses ? JSON.parse(a.weaknesses) : [],
     suggestions: a.suggestions ? JSON.parse(a.suggestions) : [],
+    metrics: a.metrics ? JSON.parse(a.metrics) : null,
   }))
 
   return NextResponse.json(parsed)
@@ -26,12 +27,12 @@ export async function POST(req: Request) {
   const user = getUserFromRequest(req)
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  const { analysis_type, period_start, period_end, summary, strengths, weaknesses, suggestions } = await req.json()
+  const { analysis_type, period_start, period_end, summary, strengths, weaknesses, suggestions, metrics } = await req.json()
 
   const id = uuidv4()
   db.prepare(
-    `INSERT INTO review_analyses (id, user_id, analysis_type, period_start, period_end, summary, strengths, weaknesses, suggestions)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO review_analyses (id, user_id, analysis_type, period_start, period_end, summary, strengths, weaknesses, suggestions, metrics)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     user.id,
@@ -41,7 +42,8 @@ export async function POST(req: Request) {
     summary || null,
     strengths ? JSON.stringify(strengths) : null,
     weaknesses ? JSON.stringify(weaknesses) : null,
-    suggestions ? JSON.stringify(suggestions) : null
+    suggestions ? JSON.stringify(suggestions) : null,
+    metrics ? JSON.stringify(metrics) : null
   )
 
   const record = db.prepare('SELECT * FROM review_analyses WHERE id = ?').get(id) as Record<string, string>
@@ -50,5 +52,6 @@ export async function POST(req: Request) {
     strengths: record.strengths ? JSON.parse(record.strengths) : [],
     weaknesses: record.weaknesses ? JSON.parse(record.weaknesses) : [],
     suggestions: record.suggestions ? JSON.parse(record.suggestions) : [],
+    metrics: record.metrics ? JSON.parse(record.metrics) : null,
   })
 }

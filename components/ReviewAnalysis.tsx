@@ -5,10 +5,202 @@ import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
-import { BarChart, Brain, Calendar, CheckCircle2, ListTodo, TrendingUp } from 'lucide-react'
+import { BarChart, Brain, Calendar, CheckCircle2, ListTodo, TrendingUp, Target, Star, AlertTriangle, ArrowUp, ArrowDown, Minus } from 'lucide-react'
+
+interface MetricsDimension {
+  name: string
+  score: number
+}
+
+interface WeakPoint {
+  name: string
+  score: number
+}
+
+interface AnalysisMetrics {
+  overall_score: number
+  dimensions: MetricsDimension[]
+  star_usage_rate: number
+  weak_points: WeakPoint[]
+  improvement_trend: number
+}
+
+interface AnalysisRecord {
+  id: string
+  analysis_type: string
+  period_start: string
+  period_end: string
+  summary: string
+  strengths: string[]
+  weaknesses: string[]
+  suggestions: string[]
+  metrics: AnalysisMetrics | null
+  created_at: string
+}
+
+function ScoreRing({ score, size = 80, label }: { score: number; size?: number; label?: string }) {
+  const radius = (size - 8) / 2
+  const circumference = 2 * Math.PI * radius
+  const progress = (score / 100) * circumference
+  const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444'
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <svg width={size} height={size} className="transform -rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="6"
+          className="text-muted/20"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth="6"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - progress}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="absolute flex items-center justify-center" style={{ width: size, height: size }}>
+        <span className="text-lg font-bold">{score}</span>
+      </div>
+      {label && <span className="text-xs text-muted-foreground">{label}</span>}
+    </div>
+  )
+}
+
+function DimensionBar({ name, score }: { name: string; score: number }) {
+  const color = score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-amber-500' : 'bg-red-500'
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span>{name}</span>
+        <span className="font-medium">{score}</span>
+      </div>
+      <div className="h-2 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${score}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function TrendIndicator({ value }: { value: number }) {
+  if (value > 0) {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-green-600 text-sm font-medium">
+        <ArrowUp className="h-3.5 w-3.5" />+{value}
+      </span>
+    )
+  } else if (value < 0) {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-red-600 text-sm font-medium">
+        <ArrowDown className="h-3.5 w-3.5" />{value}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-0.5 text-muted-foreground text-sm">
+      <Minus className="h-3.5 w-3.5" />持平
+    </span>
+  )
+}
+
+function MetricsPanel({ metrics, allMetrics }: { metrics: AnalysisMetrics; allMetrics: AnalysisMetrics[] }) {
+  return (
+    <div className="space-y-6">
+      {/* 综合分数 + STAR使用率 + 趋势 */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="text-center space-y-2">
+          <div className="relative inline-flex items-center justify-center">
+            <ScoreRing score={metrics.overall_score} size={72} />
+          </div>
+          <p className="text-xs text-muted-foreground">综合评分</p>
+        </div>
+        <div className="text-center space-y-2">
+          <div className="relative inline-flex items-center justify-center">
+            <ScoreRing score={metrics.star_usage_rate} size={72} />
+          </div>
+          <p className="text-xs text-muted-foreground">STAR 使用率</p>
+        </div>
+        <div className="flex flex-col items-center justify-center space-y-1">
+          <TrendIndicator value={metrics.improvement_trend} />
+          <p className="text-xs text-muted-foreground">进步趋势</p>
+        </div>
+      </div>
+
+      {/* 多维度评分 */}
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold flex items-center gap-1.5">
+          <Target className="h-4 w-4 text-blue-500" />
+          能力维度
+        </h4>
+        <div className="grid grid-cols-1 gap-2">
+          {metrics.dimensions.map((dim) => (
+            <DimensionBar key={dim.name} name={dim.name} score={dim.score} />
+          ))}
+        </div>
+      </div>
+
+      {/* 薄弱知识点 */}
+      {metrics.weak_points && metrics.weak_points.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold flex items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            薄弱知识点
+          </h4>
+          <div className="space-y-2">
+            {metrics.weak_points.map((wp) => (
+              <div key={wp.name} className="flex items-center justify-between p-2 bg-amber-50 dark:bg-amber-950/20 rounded-md">
+                <span className="text-sm">{wp.name}</span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  wp.score >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                }`}>
+                  掌握度 {wp.score}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 历史分数趋势（如果有多次分析） */}
+      {allMetrics.length > 1 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold flex items-center gap-1.5">
+            <TrendingUp className="h-4 w-4 text-green-500" />
+            分数趋势
+          </h4>
+          <div className="flex items-end gap-1 h-16">
+            {allMetrics.slice(0, 10).reverse().map((m, idx) => {
+              const height = (m.overall_score / 100) * 100
+              const isLatest = idx === allMetrics.slice(0, 10).length - 1
+              return (
+                <div key={idx} className="flex-1 flex flex-col items-center gap-0.5">
+                  <span className="text-[10px] text-muted-foreground">{m.overall_score}</span>
+                  <div
+                    className={`w-full rounded-t transition-all ${isLatest ? 'bg-blue-500' : 'bg-blue-200 dark:bg-blue-800'}`}
+                    style={{ height: `${height}%` }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center">← 早期 · · · 最近 →</p>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function ReviewAnalysis({ userId }: { userId: string }) {
-  const [analyses, setAnalyses] = useState<any[]>([])
+  const [analyses, setAnalyses] = useState<AnalysisRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const { toast } = useToast()
@@ -21,7 +213,7 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
     try {
       setLoading(true)
       const data = await api.getReviewAnalyses()
-      setAnalyses(data || [])
+      setAnalyses((data || []) as unknown as AnalysisRecord[])
     } catch (error: any) {
       console.error('获取复盘分析失败:', error)
       toast({
@@ -80,7 +272,7 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
       }
       const data = await response.json()
 
-      // 5. 保存分析报告
+      // 5. 保存分析报告（含量化指标）
       await api.createReviewAnalysis({
         user_id: userId,
         analysis_type: 'weekly',
@@ -90,6 +282,7 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
         strengths: data.strengths,
         weaknesses: data.weaknesses,
         suggestions: data.suggestions,
+        metrics: data.metrics || null,
       })
 
       toast({ title: '分析报告已生成' })
@@ -105,6 +298,11 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
       setGenerating(false)
     }
   }
+
+  // 收集所有有 metrics 的分析记录
+  const allMetrics = analyses
+    .filter((a) => a.metrics)
+    .map((a) => a.metrics!)
 
   return (
     <div className="space-y-6">
@@ -124,46 +322,56 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
                   <Calendar className="mr-2 h-5 w-5" />
                   复盘报告 ({analysis.period_start} ~ {analysis.period_end})
                 </CardTitle>
-                <span className="text-xs text-muted-foreground">
-                  生成时间: {new Date(analysis.created_at).toLocaleString()}
-                </span>
+                <div className="flex items-center gap-3">
+                  {analysis.metrics && (
+                    <span className="text-sm font-bold text-blue-600">
+                      {analysis.metrics.overall_score} 分
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(analysis.created_at).toLocaleString()}
+                  </span>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="pt-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 font-bold text-blue-600">
-                    <TrendingUp className="h-5 w-5" />
-                    总体评价
-                  </div>
-                  <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-                    {analysis.summary}
-                  </p>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 font-bold text-green-600">
-                      <CheckCircle2 className="h-5 w-5" />
-                      核心优势
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* 左侧：定性分析 */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 font-bold text-blue-600">
+                      <TrendingUp className="h-5 w-5" />
+                      总体评价
                     </div>
-                    <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                      {analysis.strengths?.map((s: string, idx: number) => (
-                        <li key={idx}>{s}</li>
-                      ))}
-                    </ul>
+                    <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                      {analysis.summary}
+                    </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 font-bold text-amber-600">
-                      <Brain className="h-5 w-5" />
-                      待提升项
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-green-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                        核心优势
+                      </div>
+                      <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                        {analysis.strengths?.map((s: string, idx: number) => (
+                          <li key={idx}>{s}</li>
+                        ))}
+                      </ul>
                     </div>
-                    <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                      {analysis.weaknesses?.map((w: string, idx: number) => (
-                        <li key={idx}>{w}</li>
-                      ))}
-                    </ul>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-amber-600">
+                        <Brain className="h-5 w-5" />
+                        待提升项
+                      </div>
+                      <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                        {analysis.weaknesses?.map((w: string, idx: number) => (
+                          <li key={idx}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -178,6 +386,13 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
                     </ul>
                   </div>
                 </div>
+
+                {/* 右侧：量化指标 */}
+                {analysis.metrics && (
+                  <div className="lg:border-l lg:pl-6">
+                    <MetricsPanel metrics={analysis.metrics} allMetrics={allMetrics} />
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

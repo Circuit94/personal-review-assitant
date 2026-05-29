@@ -47,6 +47,7 @@ function getDb(): InstanceType<typeof Database> {
       company TEXT,
       position TEXT,
       interview_date TEXT,
+      stage TEXT DEFAULT 'applied',
       content TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -104,6 +105,20 @@ function getDb(): InstanceType<typeof Database> {
       updated_at TEXT DEFAULT (datetime('now'))
     );
   `)
+
+  // 迁移：给已有的 interview_records 表添加 stage 列
+  try {
+    _db.exec(`ALTER TABLE interview_records ADD COLUMN stage TEXT DEFAULT 'applied'`)
+  } catch {
+    // 列已存在则忽略
+  }
+
+  // 迁移：给 review_analyses 表添加 metrics 列（量化指标追踪）
+  try {
+    _db.exec(`ALTER TABLE review_analyses ADD COLUMN metrics TEXT`)
+  } catch {
+    // 列已存在则忽略
+  }
 
   // 个人信息库表
   _db.exec(`

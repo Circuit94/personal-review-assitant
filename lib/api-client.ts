@@ -160,8 +160,10 @@ export const api = {
 
   // Interview Records
   getInterviewRecords: () => apiGet<Record<string, unknown>[]>('/api/data/interview-records'),
-  createInterviewRecord: (data: { title: string; company?: string; position?: string; interview_date?: string; content?: string }) =>
+  createInterviewRecord: (data: { title: string; company?: string; position?: string; interview_date?: string; content?: string; stage?: string }) =>
     apiPost<Record<string, unknown>>('/api/data/interview-records', data),
+  updateInterviewRecord: (data: { id: string; title?: string; company?: string; position?: string; interview_date?: string; content?: string; stage?: string }) =>
+    apiPut<Record<string, unknown>>('/api/data/interview-records', data),
   deleteInterviewRecord: (id: string) => apiDelete(`/api/data/interview-records?id=${id}`),
 
   // Chat Sessions

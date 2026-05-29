@@ -1,397 +1,500 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
-import { Brain, CheckCircle, Loader2, PlayCircle, SkipForward, MessageSquare } from 'lucide-react'
+import {
+  Brain,
+  Loader2,
+  PlayCircle,
+  Send,
+  Square,
+  Timer,
+  RotateCcw,
+  Mic,
+  User,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
-interface Question {
-  id: number
-  question: string
-  type: string
+interface Message {
+  role: 'interviewer' | 'candidate'
+  content: string
+  timestamp: number
 }
 
-interface FeedbackItem {
-  questionIndex: number
-  question: string
-  answer: string
-  feedback: string
-}
-
-// 用于保存 mock question 的数据库记录 id 映射
-// key: question_number (1-based), value: database record id
-interface QuestionRecordMap {
-  [key: number]: string
-}
+type InterviewPhase = 'idle' | 'preparing' | 'ongoing' | 'ended'
 
 export function MockInterview({ userId }: { userId: string }) {
   const [position, setPosition] = useState('')
-  const [isStarted, setIsStarted] = useState(false)
-  const [questions, setQuestions] = useState<Question[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [answer, setAnswer] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([])
-  const [showFeedback, setShowFeedback] = useState(false)
-  const [currentFeedback, setCurrentFeedback] = useState<string | null>(null)
-  const [questionRecordMap, setQuestionRecordMap] = useState<QuestionRecordMap>({})
+  const [phase, setPhase] = useState<InterviewPhase>('idle')
+  const [messages, setMessages] = useState<Message[]>([])
+  const [inputValue, setInputValue] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingContent, setStreamingContent] = useState('')
+  const [elapsedTime, setElapsedTime] = useState(0)
+  const [isInterviewEnded, setIsInterviewEnded] = useState(false)
+  const [resumeText, setResumeText] = useState('')
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const { toast } = useToast()
 
-  const handleStartInterview = async () => {
-    if (!position.trim()) return
-    setLoading(true)
-    try {
-      // 获取简历内容
-      const resumeData = await api.getResumes() as Record<string, unknown>[]
-      const resumeText = (resumeData?.[0]?.extracted_text as string) || ''
+  // 自动滚动到底部
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
 
-      // 调用 API 生成题目
-      const token = getToken()
-      const response = await fetch('/api/generate-interview-questions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ position, resumeText }),
-      })
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, streamingContent, scrollToBottom])
 
-      if (!response.ok) throw new Error('生成题目失败')
-      const data = await response.json()
-      setQuestions(data.questions)
-
-      if (data.fallback) {
-        toast({ title: '提示', description: 'AI 暂时不可用，已使用通用面试题目' })
-      }
-
-      // 创建会话记录
-      const session = await api.createChatSession({
-        title: `${position} - 模拟面试`,
-        session_type: 'mock_interview',
-        position,
-      }) as Record<string, unknown>
-      setSessionId(session.id as string)
-
-      // 保存题目到数据库
-      const questionInserts = data.questions.map((q: Question, idx: number) => ({
-        session_id: session.id as string,
-        question_number: idx + 1,
-        question: q.question,
-      }))
-
-      const savedQuestions = await api.createMockQuestions({
-        session_id: session.id as string,
-        questions: questionInserts,
-      }) as Record<string, unknown>[]
-
-      // 建立 question_number -> db id 的映射
-      const recordMap: QuestionRecordMap = {}
-      savedQuestions.forEach((q) => {
-        recordMap[q.question_number as number] = q.id as string
-      })
-      setQuestionRecordMap(recordMap)
-
-      setIsStarted(true)
-      setCurrentIndex(0)
-      setFeedbacks([])
-      setShowFeedback(false)
-      setCurrentFeedback(null)
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '开始面试失败'
-      toast({ title: '开始面试失败', description: message, variant: 'destructive' })
-    } finally {
-      setLoading(false)
+  // 计时器
+  useEffect(() => {
+    if (phase === 'ongoing') {
+      timerRef.current = setInterval(() => {
+        setElapsedTime((prev) => prev + 1)
+      }, 1000)
     }
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    }
+  }, [phase])
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   }
 
-  const handleSubmitAnswer = async () => {
-    if (!answer.trim() || !sessionId || loading) return
-    setLoading(true)
-    setCurrentFeedback(null)
+  // 调用流式 API
+  const sendToInterviewer = async (conversationMessages: Message[]) => {
+    setIsStreaming(true)
+    setStreamingContent('')
+
+    const apiMessages = conversationMessages.map((msg) => ({
+      role: msg.role === 'interviewer' ? 'assistant' : 'user',
+      content: msg.content,
+    }))
 
     try {
-      const currentQuestion = questions[currentIndex]
-
-      // 调用 AI 获取反馈
       const token = getToken()
-      const response = await fetch('/api/get-interview-feedback', {
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      const response = await fetch('/api/mock-interview', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          question: currentQuestion.question,
-          answer: answer.trim(),
           position,
+          resumeText,
+          messages: apiMessages,
         }),
+        signal: controller.signal,
       })
 
-      if (!response.ok) throw new Error('获取反馈失败')
-      const data = await response.json()
-      const feedback = data.feedback
-
-      // 更新数据库中的题目记录
-      const questionRecordId = questionRecordMap[currentIndex + 1]
-      if (questionRecordId) {
-        await api.updateMockQuestion({
-          id: questionRecordId,
-          user_answer: answer.trim(),
-          ai_feedback: feedback,
-        })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || '面试官响应失败')
       }
 
-      // 保存反馈并展示
-      const newFeedback: FeedbackItem = {
-        questionIndex: currentIndex,
-        question: currentQuestion.question,
-        answer: answer.trim(),
-        feedback,
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('无法读取响应流')
+
+      const decoder = new TextDecoder()
+      let fullContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            if (data === '[DONE]') continue
+
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.content) {
+                fullContent += parsed.content
+                setStreamingContent(fullContent)
+              }
+            } catch {
+              // 忽略解析错误
+            }
+          }
+        }
       }
-      setFeedbacks((prev) => [...prev, newFeedback])
-      setCurrentFeedback(feedback)
-      setShowFeedback(true)
+
+      // 检查是否面试结束
+      let displayContent = fullContent
+      if (fullContent.includes('[INTERVIEW_END]')) {
+        displayContent = fullContent.replace('[INTERVIEW_END]', '').trim()
+        setIsInterviewEnded(true)
+        setPhase('ended')
+        if (timerRef.current) {
+          clearInterval(timerRef.current)
+          timerRef.current = null
+        }
+      }
+
+      // 添加面试官消息
+      const interviewerMessage: Message = {
+        role: 'interviewer',
+        content: displayContent,
+        timestamp: Date.now(),
+      }
+      setMessages((prev) => [...prev, interviewerMessage])
+      setStreamingContent('')
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '提交回答失败'
-      toast({ title: '提交回答失败', description: message, variant: 'destructive' })
+      if (error instanceof Error && error.name === 'AbortError') {
+        // 用户主动中断
+        return
+      }
+      const message = error instanceof Error ? error.message : '面试官响应失败'
+      toast({ title: '出错了', description: message, variant: 'destructive' })
     } finally {
-      setLoading(false)
+      setIsStreaming(false)
+      abortControllerRef.current = null
     }
   }
 
-  const handleNextQuestion = () => {
-    setShowFeedback(false)
-    setCurrentFeedback(null)
-    setAnswer('')
+  // 开始面试
+  const handleStartInterview = async () => {
+    if (!position.trim()) return
+    setPhase('preparing')
 
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex(currentIndex + 1)
-    } else {
-      setIsStarted(false)
-      toast({ title: '面试已完成！', description: '恭喜你完成了所有题目，可以在下方查看完整反馈。' })
+    try {
+      // 获取简历
+      const resumeData = (await api.getResumes()) as Record<string, unknown>[]
+      const resume = (resumeData?.[0]?.extracted_text as string) || ''
+      setResumeText(resume)
+
+      // 创建会话记录
+      await api.createChatSession({
+        title: `${position} - 模拟面试（对话模式）`,
+        session_type: 'mock_interview',
+        position,
+      })
+
+      // 重置状态
+      setMessages([])
+      setElapsedTime(0)
+      setIsInterviewEnded(false)
+      setPhase('ongoing')
+
+      // 让面试官开场
+      await sendToInterviewer([])
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '开始面试失败'
+      toast({ title: '开始面试失败', description: message, variant: 'destructive' })
+      setPhase('idle')
     }
   }
 
-  const handleSkip = () => {
-    setShowFeedback(false)
-    setCurrentFeedback(null)
-    setAnswer('')
+  // 发送回答
+  const handleSendAnswer = async () => {
+    if (!inputValue.trim() || isStreaming || isInterviewEnded) return
 
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex(currentIndex + 1)
-    } else {
-      setIsStarted(false)
+    const candidateMessage: Message = {
+      role: 'candidate',
+      content: inputValue.trim(),
+      timestamp: Date.now(),
+    }
+
+    const updatedMessages = [...messages, candidateMessage]
+    setMessages(updatedMessages)
+    setInputValue('')
+
+    // 重置 textarea 高度
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+
+    await sendToInterviewer(updatedMessages)
+  }
+
+  // 结束面试
+  const handleEndInterview = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    setPhase('ended')
+    setIsInterviewEnded(true)
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
     }
   }
 
-  // 未开始状态
-  if (!isStarted && feedbacks.length === 0) {
+  // 重新开始
+  const handleRestart = () => {
+    setPhase('idle')
+    setMessages([])
+    setElapsedTime(0)
+    setIsInterviewEnded(false)
+    setStreamingContent('')
+    setInputValue('')
+    setPosition('')
+  }
+
+  // 自动调整 textarea 高度
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value)
+    const textarea = e.target
+    textarea.style.height = 'auto'
+    textarea.style.height = Math.min(textarea.scrollHeight, 150) + 'px'
+  }
+
+  // 键盘快捷键
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendAnswer()
+    }
+  }
+
+  // ==================== 渲染 ====================
+
+  // 空闲状态 - 开始页面
+  if (phase === 'idle') {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-6">
-        <Brain className="h-16 w-16 text-blue-600" />
-        <div className="text-center">
-          <h2 className="text-2xl font-bold">准备好开始模拟面试了吗？</h2>
-          <p className="text-muted-foreground mt-2">
-            输入您要面试的岗位，AI 将为您生成 5 个针对性的题目并提供实时反馈
+      <div className="flex flex-col items-center justify-center min-h-[500px] space-y-8">
+        <div className="relative">
+          <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl animate-pulse" />
+          <Brain className="relative h-20 w-20 text-blue-600" />
+        </div>
+
+        <div className="text-center max-w-lg">
+          <h2 className="text-3xl font-bold tracking-tight">AI 模拟面试</h2>
+          <p className="text-muted-foreground mt-3 text-lg">
+            真实对话模式 · 动态追问 · 难度递进
+          </p>
+          <p className="text-muted-foreground mt-2 text-sm">
+            AI 面试官会像真实面试一样与你对话，根据你的回答进行追问和深入探讨
           </p>
         </div>
+
         <div className="w-full max-w-md space-y-4">
           <Input
-            placeholder="例如：高级前端工程师 / 产品经理 / 数据分析师"
+            placeholder="输入目标岗位，如：高级前端工程师 / 产品经理 / 数据分析师"
             value={position}
             onChange={(e) => setPosition(e.target.value)}
-            disabled={loading}
             onKeyDown={(e) => e.key === 'Enter' && handleStartInterview()}
+            className="h-12 text-base"
           />
           <Button
             className="w-full h-12 text-lg"
             onClick={handleStartInterview}
-            disabled={loading || !position.trim()}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                正在生成面试题目...
-              </>
-            ) : (
-              <>
-                <PlayCircle className="mr-2 h-5 w-5" />
-                开始面试
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  // 面试完成，展示所有反馈
-  if (!isStarted && feedbacks.length > 0) {
-    return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="text-center space-y-2">
-          <CheckCircle className="h-12 w-12 text-green-600 mx-auto" />
-          <h2 className="text-2xl font-bold">面试完成！</h2>
-          <p className="text-muted-foreground">
-            你完成了 {feedbacks.length}/{questions.length} 道题目，以下是详细反馈
-          </p>
-        </div>
-
-        <ScrollArea className="h-[600px]">
-          <div className="space-y-6 pr-4">
-            {feedbacks.map((item, idx) => (
-              <Card key={idx}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline">Q{item.questionIndex + 1}</Badge>
-                    <CardTitle className="text-base">{item.question}</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="bg-blue-50 rounded-lg p-4">
-                    <p className="text-xs font-medium text-blue-600 mb-1">你的回答</p>
-                    <p className="text-sm text-blue-900 whitespace-pre-wrap">{item.answer}</p>
-                  </div>
-                  <div className="bg-green-50 rounded-lg p-4">
-                    <p className="text-xs font-medium text-green-600 mb-1">AI 反馈</p>
-                    <p className="text-sm text-green-900 whitespace-pre-wrap">{item.feedback}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </ScrollArea>
-
-        <div className="text-center">
-          <Button
-            onClick={() => {
-              setFeedbacks([])
-              setPosition('')
-            }}
-            size="lg"
+            disabled={!position.trim()}
           >
             <PlayCircle className="mr-2 h-5 w-5" />
-            再来一轮
+            开始面试
           </Button>
+        </div>
+
+        <div className="flex gap-6 text-sm text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <Mic className="h-4 w-4" />
+            <span>多轮追问</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Timer className="h-4 w-4" />
+            <span>实时计时</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Brain className="h-4 w-4" />
+            <span>智能评估</span>
+          </div>
         </div>
       </div>
     )
   }
 
-  // 面试进行中
-  const currentQuestion = questions[currentIndex]
+  // 准备中
+  if (phase === 'preparing') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
+        <p className="text-lg font-medium">面试官正在准备...</p>
+        <p className="text-sm text-muted-foreground">正在加载简历信息并生成面试方案</p>
+      </div>
+    )
+  }
 
+  // 面试进行中 / 已结束 - 对话界面
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold">模拟面试 - {position}</h2>
-        <span className="text-sm font-medium px-3 py-1 bg-blue-100 text-blue-700 rounded-full">
-          问题 {currentIndex + 1} / {questions.length}
-        </span>
+    <div className="flex flex-col h-[calc(100vh-12rem)] max-w-4xl mx-auto">
+      {/* 顶部状态栏 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b bg-background/95 backdrop-blur shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2.5 h-2.5 rounded-full ${
+                isInterviewEnded ? 'bg-gray-400' : 'bg-green-500 animate-pulse'
+              }`}
+            />
+            <span className="font-medium">{position}</span>
+          </div>
+          {!isInterviewEnded && (
+            <Badge variant="secondary" className="text-xs">
+              面试中
+            </Badge>
+          )}
+          {isInterviewEnded && (
+            <Badge variant="outline" className="text-xs">
+              已结束
+            </Badge>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Timer className="h-4 w-4" />
+            <span className="font-mono">{formatTime(elapsedTime)}</span>
+          </div>
+          {!isInterviewEnded ? (
+            <Button variant="destructive" size="sm" onClick={handleEndInterview}>
+              <Square className="mr-1.5 h-3.5 w-3.5" />
+              结束面试
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={handleRestart}>
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+              再来一轮
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* 进度条 */}
-      <div className="flex gap-1">
-        {questions.map((_, idx) => (
+      {/* 对话区域 */}
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 py-6 space-y-6">
+        {messages.map((msg, idx) => (
           <div
             key={idx}
-            className={`h-1.5 flex-1 rounded-full transition-colors ${
-              idx < currentIndex
-                ? 'bg-green-500'
-                : idx === currentIndex
-                  ? 'bg-blue-500'
-                  : 'bg-gray-200'
-            }`}
-          />
-        ))}
-      </div>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2 mb-2">
-            <Badge variant="outline" className="text-xs">
-              {currentQuestion.type === 'technical'
-                ? '技术题'
-                : currentQuestion.type === 'project'
-                  ? '项目题'
-                  : '行为题'}
-            </Badge>
-          </div>
-          <CardTitle className="text-lg leading-relaxed">{currentQuestion.question}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!showFeedback ? (
-            <Textarea
-              placeholder="在这里输入您的回答...（建议使用 STAR 法则组织回答）"
-              className="min-h-[200px] text-base leading-relaxed"
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              disabled={loading}
-            />
-          ) : (
-            <div className="space-y-4">
-              <div className="bg-blue-50 rounded-lg p-4">
-                <p className="text-xs font-medium text-blue-600 mb-1">你的回答</p>
-                <p className="text-sm text-blue-900 whitespace-pre-wrap">{answer}</p>
-              </div>
-              {currentFeedback && (
-                <div className="bg-green-50 rounded-lg p-4 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="flex items-center gap-2 mb-2">
-                    <MessageSquare className="h-4 w-4 text-green-600" />
-                    <p className="text-xs font-medium text-green-600">AI 面试官反馈</p>
-                  </div>
-                  <p className="text-sm text-green-900 whitespace-pre-wrap">{currentFeedback}</p>
-                </div>
+            className={`flex gap-3 ${msg.role === 'candidate' ? 'flex-row-reverse' : ''}`}
+          >
+            {/* 头像 */}
+            <div
+              className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${
+                msg.role === 'interviewer'
+                  ? 'bg-blue-100 text-blue-600'
+                  : 'bg-green-100 text-green-600'
+              }`}
+            >
+              {msg.role === 'interviewer' ? (
+                <Brain className="h-5 w-5" />
+              ) : (
+                <User className="h-5 w-5" />
               )}
             </div>
-          )}
-        </CardContent>
-        <CardFooter className="flex justify-between">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setIsStarted(false)
-              if (feedbacks.length === 0) setFeedbacks([])
-            }}
-          >
-            退出面试
-          </Button>
-          <div className="space-x-2">
-            {!showFeedback ? (
-              <>
-                <Button variant="secondary" onClick={handleSkip} disabled={loading}>
-                  <SkipForward className="mr-2 h-4 w-4" />
-                  跳过
-                </Button>
-                <Button onClick={handleSubmitAnswer} disabled={loading || !answer.trim()}>
-                  {loading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      AI 评估中...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="mr-2 h-4 w-4" />
-                      提交回答
-                    </>
-                  )}
-                </Button>
-              </>
-            ) : (
-              <Button onClick={handleNextQuestion}>
-                {currentIndex < questions.length - 1 ? '下一题 →' : '完成面试 ✓'}
-              </Button>
-            )}
+
+            {/* 消息气泡 */}
+            <div
+              className={`max-w-[75%] rounded-2xl px-4 py-3 ${
+                msg.role === 'interviewer'
+                  ? 'bg-muted text-foreground rounded-tl-sm'
+                  : 'bg-blue-600 text-white rounded-tr-sm'
+              }`}
+            >
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+            </div>
           </div>
-        </CardFooter>
-      </Card>
+        ))}
+
+        {/* 流式输出中 */}
+        {isStreaming && streamingContent && (
+          <div className="flex gap-3">
+            <div className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-blue-100 text-blue-600">
+              <Brain className="h-5 w-5" />
+            </div>
+            <div className="max-w-[75%] rounded-2xl rounded-tl-sm px-4 py-3 bg-muted text-foreground">
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{streamingContent}</p>
+            </div>
+          </div>
+        )}
+
+        {/* 正在输入指示器 */}
+        {isStreaming && !streamingContent && (
+          <div className="flex gap-3">
+            <div className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-blue-100 text-blue-600">
+              <Brain className="h-5 w-5" />
+            </div>
+            <div className="rounded-2xl rounded-tl-sm px-4 py-3 bg-muted">
+              <div className="flex gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce [animation-delay:0ms]" />
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce [animation-delay:150ms]" />
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce [animation-delay:300ms]" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 面试结束提示 */}
+        {isInterviewEnded && (
+          <Card className="border-green-200 bg-green-50">
+            <CardContent className="py-4 text-center">
+              <p className="text-green-700 font-medium">面试已结束</p>
+              <p className="text-sm text-green-600 mt-1">
+                本次面试时长 {formatTime(elapsedTime)}，共 {messages.filter((m) => m.role === 'candidate').length} 轮对话
+              </p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={handleRestart}>
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                开始新的面试
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* 输入区域 */}
+      {!isInterviewEnded && (
+        <div className="shrink-0 border-t bg-background px-4 py-3">
+          <div className="flex items-end gap-2 max-w-3xl mx-auto">
+            <Textarea
+              ref={textareaRef}
+              placeholder="输入你的回答... (Enter 发送, Shift+Enter 换行)"
+              value={inputValue}
+              onChange={handleTextareaChange}
+              onKeyDown={handleKeyDown}
+              disabled={isStreaming}
+              className="min-h-[44px] max-h-[150px] resize-none text-sm"
+              rows={1}
+            />
+            <Button
+              size="icon"
+              className="shrink-0 h-[44px] w-[44px]"
+              onClick={handleSendAnswer}
+              disabled={isStreaming || !inputValue.trim()}
+            >
+              {isStreaming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground text-center mt-2">
+            像真实面试一样回答，面试官会根据你的回答进行追问
+          </p>
+        </div>
+      )}
     </div>
   )
 }

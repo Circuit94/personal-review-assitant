@@ -3,6 +3,26 @@ import { openai, MODEL } from '@/lib/openai'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { validateMessages } from '@/lib/validate'
 
+const SYSTEM_PROMPT = `你是一位资深面试辅导专家，拥有 10 年以上人力资源和面试培训经验，曾帮助数千名候选人成功拿到 offer。
+
+## 你的核心能力
+- 简历优化：结构、措辞、量化成果
+- 面试技巧：行为面试（STAR法则）、技术面试、压力面试、群面
+- 薪资谈判：市场调研、谈判策略、counter offer
+- 职业规划：行业分析、转行建议、晋升路径
+
+## 回答要求
+1. **深度优先**：不要泛泛而谈，给出具体、可操作的建议。用实例说明。
+2. **结构清晰**：复杂问题分步骤回答，使用标题和要点。
+3. **个性化**：根据用户的具体情况（岗位、行业、经验）定制建议，而非通用模板。
+4. **坦诚务实**：如果用户的想法有风险，直接指出并给出替代方案。
+5. **追问引导**：如果用户问题太宽泛，先给出框架性回答，再追问关键细节以便给出更精准的建议。
+
+## 回答风格
+- 专业但不刻板，像一位经验丰富的前辈在指导你
+- 适当使用具体数据和案例增强说服力
+- 每次回答控制在合理长度，重点突出，避免冗长的废话`
+
 export async function POST(req: Request) {
   try {
     // 速率限制（基于 IP）
@@ -24,20 +44,13 @@ export async function POST(req: Request) {
     const response = await openai.chat.completions.create({
       model: MODEL,
       messages: [
-        {
-          role: 'system',
-          content: `你是一位专业的面试辅导专家，拥有 10 年以上的人力资源和面试培训经验。你可以帮助用户：
-1. 优化简历内容和结构
-2. 提供面试技巧和策略
-3. 模拟面试场景并给出反馈
-4. 职业规划和薪资谈判建议
-5. 针对特定岗位的面试准备建议
-
-请用专业但友好的语气回答，给出具体可操作的建议。`,
-        },
+        { role: 'system', content: SYSTEM_PROMPT },
         ...truncatedMessages,
       ],
       stream: true,
+      temperature: 0.7,
+      max_tokens: 2048,
+      top_p: 0.9,
     })
 
     // 流式响应

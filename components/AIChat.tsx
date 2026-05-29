@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
 import { Send, Loader2, MessageSquare, Bot, User } from 'lucide-react'
 import type { ChatMessage } from '@/lib/types'
@@ -17,23 +16,28 @@ export function AIChat({ userId }: { userId: string }) {
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+
+  void userId // userId is handled by auth token
+
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [])
 
   useEffect(() => {
     initSession()
-  }, [userId])
+  }, [])
 
   useEffect(() => {
-    // 自动滚动到底部
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [messages, streamingContent])
+    scrollToBottom()
+  }, [messages, streamingContent, scrollToBottom])
 
   const initSession = async () => {
     try {
-      // 查找或创建聊天会话
       const sessions = await api.getChatSessions('chat') as Record<string, unknown>[]
 
       if (sessions && sessions.length > 0) {
@@ -66,7 +70,6 @@ export function AIChat({ userId }: { userId: string }) {
     setInput('')
     setLoading(true)
 
-    // 乐观更新：立即显示用户消息
     const tempUserMsg: ChatMessage = {
       id: `temp-${Date.now()}`,
       session_id: sessionId,
@@ -77,14 +80,12 @@ export function AIChat({ userId }: { userId: string }) {
     setMessages((prev) => [...prev, tempUserMsg])
 
     try {
-      // 保存用户消息到数据库
       await api.createChatMessage({
         session_id: sessionId,
         role: 'user',
         content: userMessage,
       })
 
-      // 调用流式 AI 接口
       setStreaming(true)
       setStreamingContent('')
 
@@ -95,7 +96,6 @@ export function AIChat({ userId }: { userId: string }) {
         }))
       )
 
-      // 处理 SSE 流式响应
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let fullContent = ''
@@ -130,7 +130,6 @@ export function AIChat({ userId }: { userId: string }) {
       setStreaming(false)
       setStreamingContent('')
 
-      // 保存 AI 回复到数据库
       if (fullContent) {
         await api.createChatMessage({
           session_id: sessionId,
@@ -165,8 +164,8 @@ export function AIChat({ userId }: { userId: string }) {
   }
 
   return (
-    <Card className="h-[700px] flex flex-col">
-      <CardHeader className="border-b px-6 py-4">
+    <Card className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: '500px', maxHeight: '800px' }}>
+      <CardHeader className="border-b px-6 py-4 shrink-0">
         <CardTitle className="flex items-center gap-2 text-lg">
           <MessageSquare className="h-5 w-5 text-blue-600" />
           AI 面试辅导专家
@@ -176,9 +175,12 @@ export function AIChat({ userId }: { userId: string }) {
         </p>
       </CardHeader>
 
-      <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
-        {/* 消息列表 */}
-        <ScrollArea className="flex-1 p-6" ref={scrollRef}>
+      <CardContent className="flex-1 flex flex-col p-0 min-h-0">
+        {/* 消息列表 - 使用原生 overflow-y-auto 替代 ScrollArea */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-6 min-h-0"
+        >
           <div className="space-y-6">
             {messages.length === 0 && !streaming && (
               <div className="text-center py-12 text-muted-foreground">
@@ -210,7 +212,7 @@ export function AIChat({ userId }: { userId: string }) {
                       : 'bg-muted'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                 </div>
                 {msg.role === 'user' && (
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
@@ -227,7 +229,7 @@ export function AIChat({ userId }: { userId: string }) {
                   <Bot className="h-4 w-4 text-blue-600" />
                 </div>
                 <div className="max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed bg-muted">
-                  <p className="whitespace-pre-wrap">{streamingContent}</p>
+                  <p className="whitespace-pre-wrap break-words">{streamingContent}</p>
                   <span className="inline-block w-2 h-4 bg-blue-600 animate-pulse ml-1" />
                 </div>
               </div>
@@ -248,11 +250,14 @@ export function AIChat({ userId }: { userId: string }) {
                 </div>
               </div>
             )}
-          </div>
-        </ScrollArea>
 
-        {/* 输入区域 */}
-        <div className="border-t p-4">
+            {/* 滚动锚点 */}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* 输入区域 - 固定在底部 */}
+        <div className="border-t p-4 shrink-0">
           <div className="flex gap-2">
             <Textarea
               placeholder="输入你的问题...（Shift+Enter 换行）"

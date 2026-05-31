@@ -1,31 +1,35 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 
 export async function GET(req: Request) {
   const user = getUserFromRequest(req)
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  const resumeCount = (
-    db.prepare('SELECT COUNT(*) as count FROM resumes WHERE user_id = ?').get(user.id) as { count: number }
-  ).count
-
-  const interviewCount = (
-    db.prepare('SELECT COUNT(*) as count FROM interview_records WHERE user_id = ?').get(user.id) as { count: number }
-  ).count
-
-  const chatCount = (
-    db.prepare("SELECT COUNT(*) as count FROM chat_sessions WHERE user_id = ? AND session_type = 'chat'").get(user.id) as { count: number }
-  ).count
-
-  const audioCount = (
-    db.prepare('SELECT COUNT(*) as count FROM interview_audio_records WHERE user_id = ?').get(user.id) as { count: number }
-  ).count
+  const [resumeRes, interviewRes, chatRes, audioRes] = await Promise.all([
+    supabaseAdmin
+      .from('resumes')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id),
+    supabaseAdmin
+      .from('interview_records')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id),
+    supabaseAdmin
+      .from('chat_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('session_type', 'chat'),
+    supabaseAdmin
+      .from('interview_audio_records')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id),
+  ])
 
   return NextResponse.json({
-    resumes: resumeCount,
-    interviews: interviewCount,
-    chats: chatCount,
-    audios: audioCount,
+    resumes: resumeRes.count || 0,
+    interviews: interviewRes.count || 0,
+    chats: chatRes.count || 0,
+    audios: audioRes.count || 0,
   })
 }

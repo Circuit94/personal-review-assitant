@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { v4 as uuidv4 } from 'uuid'
-import db from './db'
+import supabaseAdmin from './db'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-secret-change-in-production'
 const TOKEN_EXPIRY = '7d'
@@ -41,9 +41,14 @@ export function getUserFromRequest(req: Request): AuthUser | null {
   return verifyToken(token)
 }
 
-export function signUp(email: string, password: string): { user: AuthUser; token: string } | { error: string } {
+export async function signUp(email: string, password: string): Promise<{ user: AuthUser; token: string } | { error: string }> {
   // 检查邮箱是否已存在
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: string } | undefined
+  const { data: existing } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('email', email)
+    .single()
+
   if (existing) {
     return { error: '该邮箱已注册' }
   }
@@ -51,17 +56,25 @@ export function signUp(email: string, password: string): { user: AuthUser; token
   const id = uuidv4()
   const passwordHash = hashPassword(password)
 
-  db.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').run(id, email, passwordHash)
+  const { error } = await supabaseAdmin
+    .from('users')
+    .insert({ id, email, password_hash: passwordHash })
+
+  if (error) {
+    return { error: '注册失败：' + error.message }
+  }
 
   const user: AuthUser = { id, email }
   const token = generateToken(user)
   return { user, token }
 }
 
-export function signIn(email: string, password: string): { user: AuthUser; token: string } | { error: string } {
-  const row = db.prepare('SELECT id, email, password_hash FROM users WHERE email = ?').get(email) as
-    | { id: string; email: string; password_hash: string }
-    | undefined
+export async function signIn(email: string, password: string): Promise<{ user: AuthUser; token: string } | { error: string }> {
+  const { data: row } = await supabaseAdmin
+    .from('users')
+    .select('id, email, password_hash')
+    .eq('email', email)
+    .single()
 
   if (!row) {
     return { error: '邮箱或密码错误' }

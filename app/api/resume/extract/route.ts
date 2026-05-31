@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { openai, MODEL } from '@/lib/openai'
 import { getUserFromRequest } from '@/lib/auth'
 import { checkRateLimit } from '@/lib/rate-limit'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 
 export async function POST(req: Request) {
   try {
@@ -22,10 +22,16 @@ export async function POST(req: Request) {
     }
 
     // 验证简历属于当前用户
-    const existing = db.prepare('SELECT id FROM resumes WHERE id = ? AND user_id = ?').get(resumeId, user.id)
+    const { data: existing } = await supabaseAdmin
+      .from('resumes')
+      .select('id')
+      .eq('id', resumeId)
+      .eq('user_id', user.id)
+      .single()
+
     if (!existing) return NextResponse.json({ error: '简历不存在' }, { status: 404 })
 
-    // 下载文件内容（本地文件需要拼接完整 URL）
+    // 下载文件内容
     const fullUrl = fileUrl.startsWith('/') ? `http://localhost:${process.env.PORT || 3000}${fileUrl}` : fileUrl
     const fileRes = await fetch(fullUrl)
     if (!fileRes.ok) throw new Error('无法下载简历文件')
@@ -66,11 +72,11 @@ export async function POST(req: Request) {
 
     // 更新数据库
     if (extractedText) {
-      db.prepare("UPDATE resumes SET extracted_text = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(
-        extractedText.slice(0, 10000),
-        resumeId,
-        user.id
-      )
+      await supabaseAdmin
+        .from('resumes')
+        .update({ extracted_text: extractedText.slice(0, 10000), updated_at: new Date().toISOString() })
+        .eq('id', resumeId)
+        .eq('user_id', user.id)
     }
 
     return NextResponse.json({ success: true, extractedText: extractedText.slice(0, 500) })

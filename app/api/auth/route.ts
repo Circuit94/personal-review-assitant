@@ -12,7 +12,7 @@ export async function POST(req: Request) {
       if (password.length < 6) {
         return NextResponse.json({ error: '密码至少 6 位' }, { status: 400 })
       }
-      const result = signUp(email, password)
+      const result = await signUp(email, password)
       if ('error' in result) {
         return NextResponse.json({ error: result.error }, { status: 400 })
       }
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       if (!email || !password) {
         return NextResponse.json({ error: '邮箱和密码不能为空' }, { status: 400 })
       }
-      const result = signIn(email, password)
+      const result = await signIn(email, password)
       if ('error' in result) {
         return NextResponse.json({ error: result.error }, { status: 401 })
       }

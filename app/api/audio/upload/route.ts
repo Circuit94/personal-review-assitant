@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
 import { checkRateLimit } from '@/lib/rate-limit'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
 export async function POST(req: Request) {
@@ -23,9 +23,11 @@ export async function POST(req: Request) {
 
     // 插入数据库记录
     const id = uuidv4()
-    db.prepare(
-      'INSERT INTO interview_audio_records (id, user_id, file_url, file_name, status) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, user.id, fileUrl, fileName || 'audio', 'pending')
+    const { error } = await supabaseAdmin
+      .from('interview_audio_records')
+      .insert({ id, user_id: user.id, file_url: fileUrl, file_name: fileName || 'audio', status: 'pending' })
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     return NextResponse.json({ success: true, recordId: id })
   } catch (error: unknown) {

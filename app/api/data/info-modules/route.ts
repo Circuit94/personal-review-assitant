@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
-// 默认模板（首次使用时自动创建）
 const DEFAULT_MODULES = [
   {
     name: '基本信息',
-    icon: '👤',
+    icon: '\u{1F464}',
     fields: [
       { label: '姓名', value: '' },
       { label: '性别', value: '' },
@@ -21,7 +20,7 @@ const DEFAULT_MODULES = [
   },
   {
     name: '教育背景',
-    icon: '🎓',
+    icon: '\u{1F393}',
     fields: [
       { label: '学校名称', value: '' },
       { label: '学历', value: '' },
@@ -34,7 +33,7 @@ const DEFAULT_MODULES = [
   },
   {
     name: '实习经历',
-    icon: '💼',
+    icon: '\u{1F4BC}',
     fields: [
       { label: '公司名称', value: '' },
       { label: '部门', value: '' },
@@ -47,7 +46,7 @@ const DEFAULT_MODULES = [
   },
   {
     name: '学校荣誉',
-    icon: '🏆',
+    icon: '\u{1F3C6}',
     fields: [
       { label: '荣誉/奖项名称', value: '' },
       { label: '颁发机构', value: '' },
@@ -58,7 +57,7 @@ const DEFAULT_MODULES = [
   },
   {
     name: '学生工作',
-    icon: '🎯',
+    icon: '\u{1F3AF}',
     fields: [
       { label: '组织名称', value: '' },
       { label: '职务', value: '' },
@@ -69,7 +68,7 @@ const DEFAULT_MODULES = [
   },
   {
     name: '技能证书',
-    icon: '📜',
+    icon: '\u{1F4DC}',
     fields: [
       { label: '证书/技能名称', value: '' },
       { label: '等级', value: '' },
@@ -79,7 +78,7 @@ const DEFAULT_MODULES = [
   },
   {
     name: '项目经历',
-    icon: '🚀',
+    icon: '\u{1F680}',
     fields: [
       { label: '项目名称', value: '' },
       { label: '角色', value: '' },
@@ -92,25 +91,28 @@ const DEFAULT_MODULES = [
   },
 ]
 
-function initDefaultModules(userId: string) {
-  const insertModule = db.prepare(
-    'INSERT INTO info_modules (id, user_id, name, icon, sort_order) VALUES (?, ?, ?, ?, ?)'
-  )
-  const insertField = db.prepare(
-    'INSERT INTO info_fields (id, module_id, user_id, label, value, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-  )
+async function initDefaultModules(userId: string) {
+  for (let modIdx = 0; modIdx < DEFAULT_MODULES.length; modIdx++) {
+    const mod = DEFAULT_MODULES[modIdx]
+    const moduleId = uuidv4()
 
-  const transaction = db.transaction(() => {
-    DEFAULT_MODULES.forEach((mod, modIdx) => {
-      const moduleId = uuidv4()
-      insertModule.run(moduleId, userId, mod.name, mod.icon, modIdx)
-      mod.fields.forEach((field, fieldIdx) => {
-        insertField.run(uuidv4(), moduleId, userId, field.label, field.value, fieldIdx)
-      })
-    })
-  })
+    await supabaseAdmin
+      .from('info_modules')
+      .insert({ id: moduleId, user_id: userId, name: mod.name, icon: mod.icon, sort_order: modIdx })
 
-  transaction()
+    const fieldRows = mod.fields.map((field, fieldIdx) => ({
+      id: uuidv4(),
+      module_id: moduleId,
+      user_id: userId,
+      label: field.label,
+      value: field.value,
+      sort_order: fieldIdx,
+    }))
+
+    if (fieldRows.length > 0) {
+      await supabaseAdmin.from('info_fields').insert(fieldRows)
+    }
+  }
 }
 
 export async function GET(req: Request) {
@@ -118,25 +120,46 @@ export async function GET(req: Request) {
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
   // 检查是否有模块，没有则初始化默认模板
-  const count = db.prepare('SELECT COUNT(*) as count FROM info_modules WHERE user_id = ?').get(user.id) as { count: number }
-  if (count.count === 0) {
-    initDefaultModules(user.id)
+  const { count } = await supabaseAdmin
+    .from('info_modules')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+
+  if (count === 0) {
+    await initDefaultModules(user.id)
   }
 
-  // 获取所有模块及其字段和附件
-  const modules = db
-    .prepare('SELECT * FROM info_modules WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC')
-    .all(user.id) as { id: string; name: string; icon: string; sort_order: number }[]
+  // 获取所有模块
+  const { data: modules } = await supabaseAdmin
+    .from('info_modules')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
 
-  const result = modules.map((mod) => {
-    const fields = db
-      .prepare('SELECT * FROM info_fields WHERE module_id = ? ORDER BY sort_order ASC, created_at ASC')
-      .all(mod.id)
-    const attachments = db
-      .prepare('SELECT * FROM info_attachments WHERE module_id = ? ORDER BY created_at DESC')
-      .all(mod.id)
-    return { ...mod, fields, attachments }
-  })
+  if (!modules) return NextResponse.json([])
+
+  // 获取所有字段和附件
+  const moduleIds = modules.map((m) => m.id)
+
+  const { data: allFields } = await supabaseAdmin
+    .from('info_fields')
+    .select('*')
+    .in('module_id', moduleIds)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  const { data: allAttachments } = await supabaseAdmin
+    .from('info_attachments')
+    .select('*')
+    .in('module_id', moduleIds)
+    .order('created_at', { ascending: false })
+
+  const result = modules.map((mod) => ({
+    ...mod,
+    fields: (allFields || []).filter((f) => f.module_id === mod.id),
+    attachments: (allAttachments || []).filter((a) => a.module_id === mod.id),
+  }))
 
   return NextResponse.json(result)
 }
@@ -149,30 +172,49 @@ export async function POST(req: Request) {
   if (!name) return NextResponse.json({ error: '模块名称不能为空' }, { status: 400 })
 
   const moduleId = uuidv4()
-  const maxOrder = db.prepare('SELECT MAX(sort_order) as max FROM info_modules WHERE user_id = ?').get(user.id) as { max: number | null }
-  const sortOrder = (maxOrder.max || 0) + 1
 
-  db.prepare('INSERT INTO info_modules (id, user_id, name, icon, sort_order) VALUES (?, ?, ?, ?, ?)').run(
-    moduleId, user.id, name, icon || '📋', sortOrder
-  )
+  // 获取当前最大 sort_order
+  const { data: maxOrderRow } = await supabaseAdmin
+    .from('info_modules')
+    .select('sort_order')
+    .eq('user_id', user.id)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .single()
+
+  const sortOrder = (maxOrderRow?.sort_order || 0) + 1
+
+  await supabaseAdmin
+    .from('info_modules')
+    .insert({ id: moduleId, user_id: user.id, name, icon: icon || '\u{1F4CB}', sort_order: sortOrder })
 
   // 如果提供了字段，批量创建
   if (Array.isArray(fields) && fields.length > 0) {
-    const insertField = db.prepare(
-      'INSERT INTO info_fields (id, module_id, user_id, label, value, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-    )
-    const transaction = db.transaction(() => {
-      fields.forEach((f: { label: string; value?: string }, idx: number) => {
-        insertField.run(uuidv4(), moduleId, user.id, f.label, f.value || '', idx)
-      })
-    })
-    transaction()
+    const fieldRows = fields.map((f: { label: string; value?: string }, idx: number) => ({
+      id: uuidv4(),
+      module_id: moduleId,
+      user_id: user.id,
+      label: f.label,
+      value: f.value || '',
+      sort_order: idx,
+    }))
+    await supabaseAdmin.from('info_fields').insert(fieldRows)
   }
 
   // 返回完整模块
-  const module = db.prepare('SELECT * FROM info_modules WHERE id = ?').get(moduleId) as Record<string, unknown>
-  const moduleFields = db.prepare('SELECT * FROM info_fields WHERE module_id = ? ORDER BY sort_order ASC').all(moduleId)
-  return NextResponse.json({ ...module, fields: moduleFields, attachments: [] })
+  const { data: module } = await supabaseAdmin
+    .from('info_modules')
+    .select('*')
+    .eq('id', moduleId)
+    .single()
+
+  const { data: moduleFields } = await supabaseAdmin
+    .from('info_fields')
+    .select('*')
+    .eq('module_id', moduleId)
+    .order('sort_order', { ascending: true })
+
+  return NextResponse.json({ ...module, fields: moduleFields || [], attachments: [] })
 }
 
 export async function PUT(req: Request) {
@@ -182,18 +224,17 @@ export async function PUT(req: Request) {
   const { id, name, icon } = await req.json()
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
-  const existing = db.prepare('SELECT id FROM info_modules WHERE id = ? AND user_id = ?').get(id, user.id)
-  if (!existing) return NextResponse.json({ error: '模块不存在' }, { status: 404 })
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (name !== undefined) updates.name = name
+  if (icon !== undefined) updates.icon = icon
 
-  const updates: string[] = []
-  const values: string[] = []
-  if (name !== undefined) { updates.push('name = ?'); values.push(name) }
-  if (icon !== undefined) { updates.push('icon = ?'); values.push(icon) }
-  updates.push("updated_at = datetime('now')")
-  values.push(id, user.id)
+  const { error } = await supabaseAdmin
+    .from('info_modules')
+    .update(updates)
+    .eq('id', id)
+    .eq('user_id', user.id)
 
-  db.prepare(`UPDATE info_modules SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...values)
-
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }
 
@@ -205,6 +246,11 @@ export async function DELETE(req: Request) {
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
-  db.prepare('DELETE FROM info_modules WHERE id = ? AND user_id = ?').run(id, user.id)
+  await supabaseAdmin
+    .from('info_modules')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id)
+
   return NextResponse.json({ success: true })
 }

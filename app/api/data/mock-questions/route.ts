@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
 export async function GET(req: Request) {
@@ -12,12 +12,22 @@ export async function GET(req: Request) {
   if (!sessionId) return NextResponse.json({ error: '缺少 session_id' }, { status: 400 })
 
   // 验证 session 属于当前用户
-  const session = db.prepare('SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?').get(sessionId, user.id)
+  const { data: session } = await supabaseAdmin
+    .from('chat_sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .eq('user_id', user.id)
+    .single()
+
   if (!session) return NextResponse.json({ error: '会话不存在' }, { status: 404 })
 
-  const questions = db
-    .prepare('SELECT * FROM mock_interview_questions WHERE session_id = ? ORDER BY question_number ASC')
-    .all(sessionId)
+  const { data: questions, error } = await supabaseAdmin
+    .from('mock_interview_questions')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('question_number', { ascending: true })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(questions)
 }
 
@@ -31,24 +41,37 @@ export async function POST(req: Request) {
   }
 
   // 验证 session 属于当前用户
-  const session = db.prepare('SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?').get(session_id, user.id)
+  const { data: session } = await supabaseAdmin
+    .from('chat_sessions')
+    .select('id')
+    .eq('id', session_id)
+    .eq('user_id', user.id)
+    .single()
+
   if (!session) return NextResponse.json({ error: '会话不存在' }, { status: 404 })
 
-  const insert = db.prepare(
-    'INSERT INTO mock_interview_questions (id, session_id, question_number, question) VALUES (?, ?, ?, ?)'
-  )
+  // 批量插入
+  const rows = questions.map((item: { question: string; question_number: number }) => ({
+    id: uuidv4(),
+    session_id,
+    question_number: item.question_number,
+    question: item.question,
+  }))
 
-  const insertMany = db.transaction((items: { question: string; question_number: number }[]) => {
-    for (const item of items) {
-      insert.run(uuidv4(), session_id, item.question_number, item.question)
-    }
-  })
+  const { error: insertError } = await supabaseAdmin
+    .from('mock_interview_questions')
+    .insert(rows)
 
-  insertMany(questions)
+  if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 })
 
-  const saved = db
-    .prepare('SELECT * FROM mock_interview_questions WHERE session_id = ? ORDER BY question_number ASC')
-    .all(session_id)
+  // 返回插入后的数据
+  const { data: saved, error } = await supabaseAdmin
+    .from('mock_interview_questions')
+    .select('*')
+    .eq('session_id', session_id)
+    .order('question_number', { ascending: true })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(saved)
 }
 
@@ -59,33 +82,40 @@ export async function PUT(req: Request) {
   const { id, user_answer, ai_feedback } = await req.json()
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
-  // 通过 join 验证所有权
-  const question = db
-    .prepare(
-      `SELECT mq.id FROM mock_interview_questions mq
-       JOIN chat_sessions cs ON mq.session_id = cs.id
-       WHERE mq.id = ? AND cs.user_id = ?`
-    )
-    .get(id, user.id)
+  // 通过 session 验证所有权
+  const { data: question } = await supabaseAdmin
+    .from('mock_interview_questions')
+    .select('id, session_id')
+    .eq('id', id)
+    .single()
+
   if (!question) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
 
-  const updates: string[] = []
-  const values: (string | null)[] = []
+  const { data: session } = await supabaseAdmin
+    .from('chat_sessions')
+    .select('id')
+    .eq('id', question.session_id)
+    .eq('user_id', user.id)
+    .single()
 
-  if (user_answer !== undefined) {
-    updates.push('user_answer = ?')
-    values.push(user_answer)
-  }
-  if (ai_feedback !== undefined) {
-    updates.push('ai_feedback = ?')
-    values.push(ai_feedback)
+  if (!session) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
+
+  const updates: Record<string, unknown> = {}
+  if (user_answer !== undefined) updates.user_answer = user_answer
+  if (ai_feedback !== undefined) updates.ai_feedback = ai_feedback
+
+  if (Object.keys(updates).length === 0) {
+    const { data } = await supabaseAdmin.from('mock_interview_questions').select('*').eq('id', id).single()
+    return NextResponse.json(data)
   }
 
-  if (updates.length > 0) {
-    values.push(id)
-    db.prepare(`UPDATE mock_interview_questions SET ${updates.join(', ')} WHERE id = ?`).run(...values)
-  }
+  const { data: updated, error } = await supabaseAdmin
+    .from('mock_interview_questions')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
 
-  const updated = db.prepare('SELECT * FROM mock_interview_questions WHERE id = ?').get(id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(updated)
 }

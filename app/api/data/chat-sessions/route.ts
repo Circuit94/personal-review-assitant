@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
 export async function GET(req: Request) {
@@ -10,9 +10,14 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const sessionType = searchParams.get('type') || 'chat'
 
-  const sessions = db
-    .prepare('SELECT * FROM chat_sessions WHERE user_id = ? AND session_type = ? ORDER BY created_at DESC')
-    .all(user.id, sessionType)
+  const { data: sessions, error } = await supabaseAdmin
+    .from('chat_sessions')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('session_type', sessionType)
+    .order('created_at', { ascending: false })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(sessions)
 }
 
@@ -23,15 +28,19 @@ export async function POST(req: Request) {
   const { session_type, title, position } = await req.json()
   const id = uuidv4()
 
-  db.prepare('INSERT INTO chat_sessions (id, user_id, session_type, title, position) VALUES (?, ?, ?, ?, ?)').run(
-    id,
-    user.id,
-    session_type || 'chat',
-    title || '新对话',
-    position || null
-  )
+  const { data: session, error } = await supabaseAdmin
+    .from('chat_sessions')
+    .insert({
+      id,
+      user_id: user.id,
+      session_type: session_type || 'chat',
+      title: title || '新对话',
+      position: position || null,
+    })
+    .select()
+    .single()
 
-  const session = db.prepare('SELECT * FROM chat_sessions WHERE id = ?').get(id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(session)
 }
 
@@ -43,6 +52,11 @@ export async function DELETE(req: Request) {
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
-  db.prepare('DELETE FROM chat_sessions WHERE id = ? AND user_id = ?').run(id, user.id)
+  await supabaseAdmin
+    .from('chat_sessions')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id)
+
   return NextResponse.json({ success: true })
 }

@@ -3,7 +3,7 @@ import { openai, MODEL } from '@/lib/openai'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { validateMessages } from '@/lib/validate'
 import { verifyToken } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 
 const BASE_SYSTEM_PROMPT = `你是一位资深面试辅导专家，拥有 10 年以上人力资源和面试培训经验，曾帮助数千名候选人成功拿到 offer。
 
@@ -28,14 +28,18 @@ const BASE_SYSTEM_PROMPT = `你是一位资深面试辅导专家，拥有 10 年
 /**
  * 获取用户的个性化上下文（简历 + 面试记录 + 个人信息）
  */
-function getUserContext(userId: string): string {
+async function getUserContext(userId: string): Promise<string> {
   const contextParts: string[] = []
 
   try {
     // 1. 获取简历摘要
-    const resume = db.prepare(
-      'SELECT extracted_text FROM resumes WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1'
-    ).get(userId) as Record<string, unknown> | undefined
+    const { data: resume } = await supabaseAdmin
+      .from('resumes')
+      .select('extracted_text')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
 
     if (resume?.extracted_text) {
       const resumeText = (resume.extracted_text as string).slice(0, 1500)
@@ -43,15 +47,14 @@ function getUserContext(userId: string): string {
     }
 
     // 2. 获取最近的面试记录（最近5条）
-    const interviews = db.prepare(
-      `SELECT title, company, position, interview_date, content 
-       FROM interview_records 
-       WHERE user_id = ? 
-       ORDER BY interview_date DESC 
-       LIMIT 5`
-    ).all(userId) as Record<string, unknown>[]
+    const { data: interviews } = await supabaseAdmin
+      .from('interview_records')
+      .select('title, company, position, interview_date')
+      .eq('user_id', userId)
+      .order('interview_date', { ascending: false })
+      .limit(5)
 
-    if (interviews.length > 0) {
+    if (interviews && interviews.length > 0) {
       const interviewSummary = interviews.map((r) => {
         const parts = [
           r.company ? `公司: ${r.company}` : '',
@@ -65,41 +68,55 @@ function getUserContext(userId: string): string {
     }
 
     // 3. 获取个人信息库关键字段
-    const infoFields = db.prepare(
-      `SELECT m.name as module_name, f.label, f.value 
-       FROM info_fields f 
-       JOIN info_modules m ON f.module_id = m.id 
-       WHERE f.user_id = ? AND f.value != '' 
-       ORDER BY m.sort_order, f.sort_order 
-       LIMIT 20`
-    ).all(userId) as Record<string, unknown>[]
+    const { data: infoFields } = await supabaseAdmin
+      .from('info_fields')
+      .select('label, value, module_id')
+      .eq('user_id', userId)
+      .neq('value', '')
+      .limit(20)
 
-    if (infoFields.length > 0) {
-      const infoSummary = infoFields.map((f) => 
-        `- [${f.module_name}] ${f.label}: ${(f.value as string).slice(0, 200)}`
+    if (infoFields && infoFields.length > 0) {
+      // 获取对应的模块名
+      const moduleIds = [...new Set(infoFields.map((f) => f.module_id))]
+      const { data: modules } = await supabaseAdmin
+        .from('info_modules')
+        .select('id, name')
+        .in('id', moduleIds)
+
+      const moduleMap = new Map((modules || []).map((m) => [m.id, m.name]))
+
+      const infoSummary = infoFields.map((f) =>
+        `- [${moduleMap.get(f.module_id) || '未知'}] ${f.label}: ${(f.value as string).slice(0, 200)}`
       ).join('\n')
       contextParts.push(`## 用户个人信息\n${infoSummary}`)
     }
 
-    // 4. 获取模拟面试中的薄弱点（最近的 AI 反馈）
-    const recentFeedback = db.prepare(
-      `SELECT q.question, q.ai_feedback 
-       FROM mock_interview_questions q 
-       JOIN chat_sessions s ON q.session_id = s.id 
-       WHERE s.user_id = ? AND q.ai_feedback IS NOT NULL 
-       ORDER BY q.created_at DESC 
-       LIMIT 3`
-    ).all(userId) as Record<string, unknown>[]
+    // 4. 获取模拟面试中的薄弱点
+    const { data: recentSessions } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(10)
 
-    if (recentFeedback.length > 0) {
-      const feedbackSummary = recentFeedback.map((f) =>
-        `- 问题: ${(f.question as string).slice(0, 80)}\n  反馈: ${(f.ai_feedback as string).slice(0, 150)}`
-      ).join('\n')
-      contextParts.push(`## 最近模拟面试反馈（薄弱点参考）\n${feedbackSummary}`)
+    if (recentSessions && recentSessions.length > 0) {
+      const sessionIds = recentSessions.map((s) => s.id)
+      const { data: recentFeedback } = await supabaseAdmin
+        .from('mock_interview_questions')
+        .select('question, ai_feedback')
+        .in('session_id', sessionIds)
+        .not('ai_feedback', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(3)
+
+      if (recentFeedback && recentFeedback.length > 0) {
+        const feedbackSummary = recentFeedback.map((f) =>
+          `- 问题: ${(f.question as string).slice(0, 80)}\n  反馈: ${(f.ai_feedback as string).slice(0, 150)}`
+        ).join('\n')
+        contextParts.push(`## 最近模拟面试反馈（薄弱点参考）\n${feedbackSummary}`)
+      }
     }
   } catch (error) {
     console.error('Failed to load user context:', error)
-    // 上下文加载失败不影响主流程
   }
 
   if (contextParts.length === 0) return ''
@@ -130,7 +147,7 @@ export async function POST(req: Request) {
       try {
         const payload = verifyToken(token)
         if (payload?.id) {
-          userContext = getUserContext(payload.id)
+          userContext = await getUserContext(payload.id)
         }
       } catch {
         // token 无效不影响聊天，只是没有个性化上下文

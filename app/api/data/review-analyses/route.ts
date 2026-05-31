@@ -1,26 +1,22 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
 export async function GET(req: Request) {
   const user = getUserFromRequest(req)
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  const analyses = db
-    .prepare('SELECT * FROM review_analyses WHERE user_id = ? ORDER BY created_at DESC')
-    .all(user.id)
+  const { data: analyses, error } = await supabaseAdmin
+    .from('review_analyses')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
 
-  // JSON 字段反序列化
-  const parsed = (analyses as Record<string, string>[]).map((a) => ({
-    ...a,
-    strengths: a.strengths ? JSON.parse(a.strengths) : [],
-    weaknesses: a.weaknesses ? JSON.parse(a.weaknesses) : [],
-    suggestions: a.suggestions ? JSON.parse(a.suggestions) : [],
-    metrics: a.metrics ? JSON.parse(a.metrics) : null,
-  }))
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json(parsed)
+  // Supabase 的 jsonb 字段会自动反序列化，无需手动 JSON.parse
+  return NextResponse.json(analyses)
 }
 
 export async function POST(req: Request) {
@@ -30,28 +26,24 @@ export async function POST(req: Request) {
   const { analysis_type, period_start, period_end, summary, strengths, weaknesses, suggestions, metrics } = await req.json()
 
   const id = uuidv4()
-  db.prepare(
-    `INSERT INTO review_analyses (id, user_id, analysis_type, period_start, period_end, summary, strengths, weaknesses, suggestions, metrics)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    user.id,
-    analysis_type || 'weekly',
-    period_start || null,
-    period_end || null,
-    summary || null,
-    strengths ? JSON.stringify(strengths) : null,
-    weaknesses ? JSON.stringify(weaknesses) : null,
-    suggestions ? JSON.stringify(suggestions) : null,
-    metrics ? JSON.stringify(metrics) : null
-  )
 
-  const record = db.prepare('SELECT * FROM review_analyses WHERE id = ?').get(id) as Record<string, string>
-  return NextResponse.json({
-    ...record,
-    strengths: record.strengths ? JSON.parse(record.strengths) : [],
-    weaknesses: record.weaknesses ? JSON.parse(record.weaknesses) : [],
-    suggestions: record.suggestions ? JSON.parse(record.suggestions) : [],
-    metrics: record.metrics ? JSON.parse(record.metrics) : null,
-  })
+  const { data: record, error } = await supabaseAdmin
+    .from('review_analyses')
+    .insert({
+      id,
+      user_id: user.id,
+      analysis_type: analysis_type || 'weekly',
+      period_start: period_start || null,
+      period_end: period_end || null,
+      summary: summary || null,
+      strengths: strengths || [],
+      weaknesses: weaknesses || [],
+      suggestions: suggestions || [],
+      metrics: metrics || null,
+    })
+    .select()
+    .single()
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(record)
 }

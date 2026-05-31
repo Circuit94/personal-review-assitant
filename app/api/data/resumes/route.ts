@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
 
 export async function GET(req: Request) {
   const user = getUserFromRequest(req)
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  const resumes = db.prepare('SELECT * FROM resumes WHERE user_id = ? ORDER BY created_at DESC').all(user.id)
+  const { data: resumes, error } = await supabaseAdmin
+    .from('resumes')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(resumes)
 }
 
@@ -18,15 +24,19 @@ export async function POST(req: Request) {
   const { file_name, file_url, extracted_text } = await req.json()
   const id = uuidv4()
 
-  db.prepare('INSERT INTO resumes (id, user_id, file_name, file_url, extracted_text) VALUES (?, ?, ?, ?, ?)').run(
-    id,
-    user.id,
-    file_name,
-    file_url || null,
-    extracted_text || null
-  )
+  const { data: resume, error } = await supabaseAdmin
+    .from('resumes')
+    .insert({
+      id,
+      user_id: user.id,
+      file_name,
+      file_url: file_url || null,
+      extracted_text: extracted_text || null,
+    })
+    .select()
+    .single()
 
-  const resume = db.prepare('SELECT * FROM resumes WHERE id = ?').get(id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(resume)
 }
 
@@ -37,26 +47,20 @@ export async function PUT(req: Request) {
   const { id, extracted_text, file_name } = await req.json()
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
-  const existing = db.prepare('SELECT id FROM resumes WHERE id = ? AND user_id = ?').get(id, user.id)
-  if (!existing) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (extracted_text !== undefined) updates.extracted_text = extracted_text
+  if (file_name !== undefined) updates.file_name = file_name
 
-  const updates: string[] = []
-  const values: (string | null)[] = []
+  const { data: updated, error } = await supabaseAdmin
+    .from('resumes')
+    .update(updates)
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .select()
+    .single()
 
-  if (extracted_text !== undefined) {
-    updates.push('extracted_text = ?')
-    values.push(extracted_text)
-  }
-  if (file_name !== undefined) {
-    updates.push('file_name = ?')
-    values.push(file_name)
-  }
-  updates.push("updated_at = datetime('now')")
-  values.push(id, user.id)
-
-  db.prepare(`UPDATE resumes SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...values)
-
-  const updated = db.prepare('SELECT * FROM resumes WHERE id = ?').get(id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!updated) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
   return NextResponse.json(updated)
 }
 
@@ -68,6 +72,11 @@ export async function DELETE(req: Request) {
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
-  db.prepare('DELETE FROM resumes WHERE id = ? AND user_id = ?').run(id, user.id)
+  await supabaseAdmin
+    .from('resumes')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id)
+
   return NextResponse.json({ success: true })
 }

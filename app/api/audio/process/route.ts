@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { openai, MODEL, whisperClient } from '@/lib/openai'
 import { getUserFromRequest } from '@/lib/auth'
-import db from '@/lib/db'
+import supabaseAdmin from '@/lib/db'
 
 export const maxDuration = 300
 
@@ -20,12 +20,19 @@ export async function POST(req: Request) {
     }
 
     // 1. Update status to 'transcribing'
-    db.prepare("UPDATE interview_audio_records SET status = 'transcribing', updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(recordId, user.id)
+    await supabaseAdmin
+      .from('interview_audio_records')
+      .update({ status: 'transcribing', updated_at: new Date().toISOString() })
+      .eq('id', recordId)
+      .eq('user_id', user.id)
 
     // 2. Fetch record
-    const record = db.prepare('SELECT * FROM interview_audio_records WHERE id = ? AND user_id = ?').get(recordId, user.id) as {
-      id: string; file_url: string; file_name: string
-    } | undefined
+    const { data: record } = await supabaseAdmin
+      .from('interview_audio_records')
+      .select('*')
+      .eq('id', recordId)
+      .eq('user_id', user.id)
+      .single()
 
     if (!record) throw new Error('Record not found')
 
@@ -48,11 +55,13 @@ export async function POST(req: Request) {
     const rawText = transcription.text
 
     // 4. Update status to 'analyzing'
-    db.prepare("UPDATE interview_audio_records SET status = 'analyzing', transcription = ?, updated_at = datetime('now') WHERE id = ?").run(rawText, recordId)
+    await supabaseAdmin
+      .from('interview_audio_records')
+      .update({ status: 'analyzing', transcription: rawText, updated_at: new Date().toISOString() })
+      .eq('id', recordId)
 
     // 5. AI analysis
-    const analysisPrompt = `
-你是一位资深的面试分析专家。请根据以下面试录音的转写文本进行多维度分析。
+    const analysisPrompt = `你是一位资深的面试分析专家。请根据以下面试录音的转写文本进行多维度分析。
 
 要求：
 1. 将文本拆分为"面试官(interviewer)"和"候选人(candidate)"的对话片段。
@@ -73,7 +82,7 @@ ${rawText.slice(0, 6000)}
     "duration": 0,
     "type": "technical",
     "score": 85,
-    "keywords": ["React", "Hooks", "性能优化"],
+    "keywords": ["React", "Hooks"],
     "sentiment": "正面",
     "summary": "...",
     "suggestions": ["建议1", "建议2", "建议3"],
@@ -99,9 +108,15 @@ ${rawText.slice(0, 6000)}
     const analysisContent = JSON.parse(analysisRes.choices[0].message.content || '{}')
 
     // 6. Final update
-    db.prepare(
-      "UPDATE interview_audio_records SET status = 'completed', qa_segments = ?, analysis = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(JSON.stringify(analysisContent.qa_segments), JSON.stringify(analysisContent.analysis), recordId)
+    await supabaseAdmin
+      .from('interview_audio_records')
+      .update({
+        status: 'completed',
+        qa_segments: analysisContent.qa_segments,
+        analysis: analysisContent.analysis,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', recordId)
 
     return NextResponse.json({ success: true })
   } catch (error: unknown) {
@@ -109,9 +124,14 @@ ${rawText.slice(0, 6000)}
     console.error('Processing error:', errorMessage)
 
     if (recordId) {
-      db.prepare(
-        "UPDATE interview_audio_records SET status = 'failed', analysis = ?, updated_at = datetime('now') WHERE id = ?"
-      ).run(JSON.stringify({ error: errorMessage }), recordId)
+      await supabaseAdmin
+        .from('interview_audio_records')
+        .update({
+          status: 'failed',
+          analysis: { error: errorMessage },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', recordId)
     }
 
     return NextResponse.json({ error: 'Processing failed', details: errorMessage }, { status: 500 })

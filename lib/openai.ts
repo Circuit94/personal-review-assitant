@@ -9,9 +9,3 @@ export const openai = new OpenAI({
 })
 
 export const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
-
-// Whisper 语音转写客户端（DeepSeek 不支持语音，使用 OpenAI Whisper）
-export const whisperClient = new OpenAI({
-  apiKey: process.env.WHISPER_API_KEY || process.env.DEEPSEEK_API_KEY || 'sk-placeholder',
-  baseURL: process.env.WHISPER_BASE_URL || 'https://api.openai.com/v1',
-})

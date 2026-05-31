@@ -196,6 +196,12 @@ export const api = {
   updateAudioRecord: (data: { id: string; status?: string; transcription?: string; qa_segments?: unknown; analysis?: unknown }) =>
     apiPut<Record<string, unknown>>('/api/data/audio-records', data),
 
+  // Sprint Records
+  getSprintRecords: () => apiGet<Record<string, unknown>[]>('/api/data/sprint-records'),
+  createSprintRecord: (data: { company: string; position: string; sprint_data: unknown }) =>
+    apiPost<Record<string, unknown>>('/api/data/sprint-records', data),
+  deleteSprintRecord: (id: string) => apiDelete(`/api/data/sprint-records?id=${id}`),
+
   // Personal Info Bank
   getInfoModules: () => apiGet<Record<string, unknown>[]>('/api/data/info-modules'),
   createInfoModule: (data: { name: string; icon?: string; fields?: { label: string; value?: string }[] }) =>

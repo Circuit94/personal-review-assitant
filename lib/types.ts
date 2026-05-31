@@ -56,12 +56,9 @@ export interface MockInterviewQuestion {
 export interface QASegment {
   role: 'interviewer' | 'candidate'
   content: string
-  start_time?: number
-  end_time?: number
 }
 
 export interface AudioAnalysis {
-  duration?: number
   type?: string
   score?: number
   keywords?: string[]
@@ -85,7 +82,7 @@ export interface AudioRecord {
   file_url: string
   file_format: string
   file_size: number
-  status: 'pending' | 'transcribing' | 'analyzing' | 'completed' | 'failed'
+  status: 'analyzing' | 'completed' | 'failed'
   transcription?: string
   qa_segments?: QASegment[]
   analysis?: AudioAnalysis
@@ -104,4 +101,31 @@ export interface ReviewAnalysisRecord {
   weaknesses: string[]
   suggestions: string[]
   created_at: string
+}
+
+export interface SprintTask {
+  time: string
+  title: string
+  description: string
+  checklist: string[]
+}
+
+export interface SprintData {
+  company_brief: string
+  tasks: SprintTask[]
+  key_questions: string[]
+  talking_points: string[]
+  red_flags: string[]
+  reverse_questions: string[]
+  raw?: string
+}
+
+export interface SprintRecord {
+  id: string
+  user_id: string
+  company: string
+  position: string
+  sprint_data: SprintData
+  created_at: string
+  updated_at: string
 }

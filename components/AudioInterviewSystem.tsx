@@ -5,10 +5,10 @@ import { api, getToken } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { Mic, Upload, FileAudio, Play, Loader2, CheckCircle2, BarChart3, FileDown, X } from 'lucide-react'
+import { MessageSquareText, Loader2, CheckCircle2, BarChart3, FileDown, X, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -27,8 +27,9 @@ import type { AudioRecord, RadarDimension } from '@/lib/types'
 export function AudioInterviewSystem({ userId }: { userId: string }) {
   const [records, setRecords] = useState<AudioRecord[]>([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [inputText, setInputText] = useState('')
+  const [inputTitle, setInputTitle] = useState('')
   const [selectedRecord, setSelectedRecord] = useState<AudioRecord | null>(null)
   const { toast } = useToast()
 
@@ -37,7 +38,7 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       const data = await api.getAudioRecords()
       setRecords((data as unknown as AudioRecord[]) || [])
     } catch (error) {
-      console.error('获取音频记录失败:', error)
+      console.error('获取记录失败:', error)
     } finally {
       setLoading(false)
     }
@@ -50,7 +51,7 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
   // 条件轮询：仅当有处理中的记录时才轮询
   useEffect(() => {
     const hasProcessing = records.some(
-      (r) => r.status === 'pending' || r.status === 'transcribing' || r.status === 'analyzing'
+      (r) => r.status === 'analyzing'
     )
 
     if (!hasProcessing) return
@@ -59,12 +60,11 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
     return () => clearInterval(interval)
   }, [records, fetchRecords])
 
-  // 获取雷达图数据：优先使用真实分析数据，否则显示空状态
+  // 获取雷达图数据
   const getRadarData = (): RadarDimension[] => {
     if (selectedRecord?.analysis?.dimensions && selectedRecord.analysis.dimensions.length > 0) {
       return selectedRecord.analysis.dimensions
     }
-    // 如果 AI 返回了 score 但没有 dimensions，基于 score 生成合理的默认维度
     if (selectedRecord?.analysis?.score) {
       const baseScore = selectedRecord.analysis.score
       return [
@@ -76,6 +76,50 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       ]
     }
     return []
+  }
+
+  const handleSubmit = async () => {
+    if (!inputText.trim()) {
+      toast({ title: '请输入内容', description: '请粘贴面试对话文本', variant: 'destructive' })
+      return
+    }
+
+    if (inputText.trim().length < 50) {
+      toast({ title: '内容过短', description: '请输入至少50个字符的面试对话内容', variant: 'destructive' })
+      return
+    }
+
+    setAnalyzing(true)
+
+    try {
+      const token = getToken()
+      const res = await fetch('/api/audio/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text: inputText,
+          title: inputTitle.trim() || undefined,
+        }),
+      })
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || errData.details || '分析失败')
+      }
+
+      toast({ title: '分析完成', description: 'AI 已完成面试对话智能分析' })
+      setInputText('')
+      setInputTitle('')
+      fetchRecords()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '分析失败'
+      toast({ title: '分析失败', description: message, variant: 'destructive' })
+    } finally {
+      setAnalyzing(false)
+    }
   }
 
   const exportToPDF = () => {
@@ -90,13 +134,10 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       selectedRecord.qa_segments?.map((seg) => [
         seg.role === 'interviewer' ? 'Interviewer' : 'Candidate',
         seg.content.slice(0, 100),
-        seg.start_time !== undefined
-          ? `${Math.floor(seg.start_time / 60)}:${(seg.start_time % 60).toString().padStart(2, '0')}`
-          : '-',
       ]) || []
 
     doc.autoTable({
-      head: [['Role', 'Content', 'Timestamp']],
+      head: [['Role', 'Content']],
       body: tableData,
       startY: 45,
     })
@@ -110,8 +151,6 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
       selectedRecord.qa_segments?.map((seg) => ({
         角色: seg.role === 'interviewer' ? '面试官' : '候选人',
         内容: seg.content,
-        开始时间: seg.start_time || 0,
-        结束时间: seg.end_time || 0,
       })) || []
     )
     const wb = XLSX.utils.book_new()
@@ -132,100 +171,8 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
     XLSX.writeFile(wb, `${selectedRecord.title}_分析报告.xlsx`)
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const file = e.dataTransfer.files?.[0]
-    if (file) await processFile(file)
-  }
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) await processFile(file)
-  }
-
-  const processFile = async (file: File) => {
-    const validFormats = ['.mp3', '.wav', '.m4a']
-    const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
-    if (!validFormats.includes(fileExt)) {
-      toast({ title: '格式错误', description: '仅支持 MP3, WAV, M4A 格式', variant: 'destructive' })
-      return
-    }
-
-    if (file.size > 50 * 1024 * 1024) {
-      toast({ title: '文件太大', description: '单个文件不能超过 50MB', variant: 'destructive' })
-      return
-    }
-
-    setUploading(true)
-    setUploadProgress(0)
-
-    try {
-      // 1. 上传文件获取 URL
-      setUploadProgress(10)
-      const { url: fileUrl, fileName } = await api.uploadFile(file, 'audio')
-      setUploadProgress(50)
-
-      // 2. 创建音频记录（调用 /api/audio/upload）
-      const token = getToken()
-      const uploadRes = await fetch('/api/audio/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ fileUrl, fileName }),
-      })
-
-      if (!uploadRes.ok) {
-        const errData = await uploadRes.json().catch(() => ({}))
-        throw new Error(errData.error || '创建音频记录失败')
-      }
-
-      const uploadData = await uploadRes.json()
-      setUploadProgress(70)
-
-      // 3. 触发后台处理（调用 /api/audio/process）
-      const recordId = uploadData.record?.id || uploadData.id
-      if (recordId) {
-        const processRes = await fetch('/api/audio/process', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ recordId }),
-        })
-
-        if (!processRes.ok) {
-          const errData = await processRes.json().catch(() => ({}))
-          throw new Error(errData.error || '触发处理失败')
-        }
-      }
-
-      setUploadProgress(100)
-      toast({ title: '上传成功', description: '正在后台进行转写与智能分析...' })
-      fetchRecords()
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '上传失败'
-      toast({ title: '上传失败', description: message, variant: 'destructive' })
-    } finally {
-      setUploading(false)
-      setTimeout(() => setUploadProgress(0), 1000)
-    }
-  }
-
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'pending':
-        return <Badge variant="secondary">等待中</Badge>
-      case 'transcribing':
-        return <Badge variant="outline" className="animate-pulse">转写中...</Badge>
       case 'analyzing':
         return <Badge variant="outline" className="animate-pulse">分析中...</Badge>
       case 'completed':
@@ -241,49 +188,59 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-      {/* 左侧：列表与上传 */}
+      {/* 左侧：文本输入与历史列表 */}
       <div className="lg:col-span-1 space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Mic className="h-5 w-5 text-blue-600" />
-              面试录音上传
+              <MessageSquareText className="h-5 w-5 text-blue-600" />
+              面试文本分析
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              className="flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 hover:bg-muted/50 transition-all cursor-pointer relative min-h-[160px]"
-            >
-              <Input
-                type="file"
-                accept=".mp3,.wav,.m4a"
-                onChange={handleFileUpload}
-                disabled={uploading}
-                className="absolute inset-0 opacity-0 cursor-pointer z-10"
-              />
-              <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-              <p className="text-sm font-medium">点击或拖拽上传面试录音</p>
-              <p className="text-xs text-muted-foreground mt-2">支持 MP3, WAV, M4A (最大 50MB)</p>
+            <Input
+              placeholder="标题（选填，如：字节前端二面）"
+              value={inputTitle}
+              onChange={(e) => setInputTitle(e.target.value)}
+              disabled={analyzing}
+            />
+            <Textarea
+              placeholder="粘贴面试对话文本...&#10;&#10;支持格式示例：&#10;面试官：请自我介绍一下&#10;候选人：我是...&#10;&#10;或者直接粘贴面试录音转写后的文字"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              disabled={analyzing}
+              className="min-h-[200px] resize-y"
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {inputText.length} 字符
+              </span>
+              <Button
+                onClick={handleSubmit}
+                disabled={analyzing || !inputText.trim()}
+                className="gap-2"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    AI 分析中...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    开始分析
+                  </>
+                )}
+              </Button>
             </div>
-            {uploading && (
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span>正在上传...</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <Progress value={uploadProgress} className="h-1" />
-              </div>
-            )}
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col h-[500px] lg:h-[600px]">
+        <Card className="flex flex-col h-[400px] lg:h-[500px]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <FileAudio className="h-5 w-5 text-blue-600" />
-              历史录音
+              <MessageSquareText className="h-5 w-5 text-blue-600" />
+              历史分析记录
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0 flex-1 overflow-hidden">
@@ -302,15 +259,16 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
                       {getStatusBadge(record.status)}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Play className="h-3 w-3" />
-                      {(record.file_size / (1024 * 1024)).toFixed(1)} MB |{' '}
                       {new Date(record.created_at).toLocaleDateString()}
+                      {record.analysis?.score && (
+                        <span className="text-blue-600 font-medium">· {record.analysis.score}分</span>
+                      )}
                     </div>
                   </div>
                 ))}
                 {records.length === 0 && !loading && (
                   <div className="text-center py-12 text-muted-foreground">
-                    <p className="text-sm italic">暂无录音，立即上传您的第一份面试录音</p>
+                    <p className="text-sm italic">暂无记录，粘贴面试文本开始第一次分析</p>
                   </div>
                 )}
                 {loading && (
@@ -329,16 +287,16 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
         {!selectedRecord ? (
           <Card className="h-full min-h-[400px] flex flex-col items-center justify-center p-12 text-center bg-muted/20 border-dashed">
             <BarChart3 className="h-16 w-16 text-muted-foreground/30 mb-6" />
-            <h3 className="text-xl font-bold text-muted-foreground">选择一份录音查看深度分析</h3>
+            <h3 className="text-xl font-bold text-muted-foreground">选择一份记录查看深度分析</h3>
             <p className="text-muted-foreground mt-2 max-w-sm">
-              AI 将自动识别面试官提问与候选人回答，并从多维度为您提供专业反馈。
+              粘贴面试对话文本，AI 将自动识别面试官提问与候选人回答，并从多维度为您提供专业反馈。
             </p>
           </Card>
         ) : (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <h2 className="text-xl lg:text-2xl font-bold flex items-center gap-2">
-                <Mic className="h-5 w-5 lg:h-6 lg:w-6 text-blue-600" />
+                <MessageSquareText className="h-5 w-5 lg:h-6 lg:w-6 text-blue-600" />
                 {selectedRecord.title} - 面试复盘报告
               </h2>
               <div className="flex gap-2 flex-wrap">
@@ -459,12 +417,6 @@ export function AudioInterviewSystem({ userId }: { userId: string }) {
                             </div>
                             <div className="space-y-2 flex-1">
                               <p className="text-sm leading-relaxed">{seg.content}</p>
-                              {seg.start_time !== undefined && (
-                                <p className="text-[10px] text-muted-foreground italic">
-                                  {Math.floor(seg.start_time / 60)}:
-                                  {(seg.start_time % 60).toString().padStart(2, '0')}
-                                </p>
-                              )}
                             </div>
                           </div>
                         ))}

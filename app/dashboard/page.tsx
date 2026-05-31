@@ -20,7 +20,7 @@ import {
   History,
   BarChart3,
   LayoutDashboard,
-  Mic,
+  MessageSquareText,
   Upload,
   Brain,
   TrendingUp,
@@ -44,7 +44,7 @@ function getReadinessScore(stats: DashboardStats): number {
   score += Math.min(stats.mockCount * 7, 35)
   // 面试记录 (20分，每条+5，最多20)
   score += Math.min(stats.interviewCount * 5, 20)
-  // 录音分析 (20分，每条+10，最多20)
+  // 面试复盘 (20分，每条+10，最多20)
   score += Math.min(stats.audioCount * 10, 20)
   return Math.min(score, 100)
 }
@@ -241,9 +241,9 @@ export default function Dashboard() {
                 <span className="sm:hidden">记录</span>
               </TabsTrigger>
               <TabsTrigger value="audio" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
-                <Mic className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">录音分析</span>
-                <span className="sm:hidden">录音</span>
+                <MessageSquareText className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">面试复盘</span>
+                <span className="sm:hidden">复盘</span>
               </TabsTrigger>
               <TabsTrigger value="analysis" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <BarChart3 className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
@@ -354,10 +354,10 @@ export default function Dashboard() {
                   <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-xs text-muted-foreground">录音分析</p>
+                        <p className="text-xs text-muted-foreground">面试复盘</p>
                         <p className="text-2xl font-bold">{stats.audioCount}</p>
                       </div>
-                      <Mic className="h-7 w-7 text-orange-500 opacity-50" />
+                      <MessageSquareText className="h-7 w-7 text-orange-500 opacity-50" />
                     </div>
                   </CardContent>
                 </Card>

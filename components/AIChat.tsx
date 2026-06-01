@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { Send, Loader2, MessageSquare, Bot, User } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import type { ChatMessage } from '@/lib/types'
 
 export function AIChat({ userId }: { userId: string }) {
@@ -212,7 +213,13 @@ export function AIChat({ userId }: { userId: string }) {
                       : 'bg-muted'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  {msg.role === 'user' ? (
+                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  ) : (
+                    <div className="markdown-body">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  )}
                 </div>
                 {msg.role === 'user' && (
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
@@ -229,7 +236,9 @@ export function AIChat({ userId }: { userId: string }) {
                   <Bot className="h-4 w-4 text-blue-600" />
                 </div>
                 <div className="max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed bg-muted">
-                  <p className="whitespace-pre-wrap break-words">{streamingContent}</p>
+                  <div className="markdown-body">
+                    <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                  </div>
                   <span className="inline-block w-2 h-4 bg-blue-600 animate-pulse ml-1" />
                 </div>
               </div>

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   const user = getUserFromRequest(req)
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  const { file_name, file_url, extracted_text } = await req.json()
+  const { file_name, file_url, extracted_text, version_label } = await req.json()
   const id = uuidv4()
 
   const { data: resume, error } = await supabaseAdmin
@@ -32,6 +32,7 @@ export async function POST(req: Request) {
       file_name,
       file_url: file_url || null,
       extracted_text: extracted_text || null,
+      version_label: version_label || '默认',
     })
     .select()
     .single()
@@ -44,12 +45,13 @@ export async function PUT(req: Request) {
   const user = getUserFromRequest(req)
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  const { id, extracted_text, file_name } = await req.json()
+  const { id, extracted_text, file_name, version_label } = await req.json()
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (extracted_text !== undefined) updates.extracted_text = extracted_text
   if (file_name !== undefined) updates.file_name = file_name
+  if (version_label !== undefined) updates.version_label = version_label
 
   const { data: updated, error } = await supabaseAdmin
     .from('resumes')

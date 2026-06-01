@@ -11,7 +11,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: '生成过于频繁，请 5 分钟后重试' }, { status: 429 })
     }
 
-    const { interviewRecords, mockQuestions } = await req.json()
+    const { interviewRecords, mockQuestions, mockInterviewRecords } = await req.json()
+
+    // 处理新版模拟面试记录数据（提取关键信息）
+    const mockInterviewSummary = (mockInterviewRecords || []).slice(0, 10).map((r: Record<string, unknown>) => ({
+      position: r.position,
+      overall_score: r.overall_score,
+      dimensions: r.dimensions,
+      question_count: r.question_count,
+      duration: r.duration,
+      created_at: r.created_at,
+      settings: r.settings,
+    }))
 
     const prompt = `
 你是一位资深的面试教练和职业发展顾问。请根据以下用户的面试记录和模拟面试数据，生成一份深度复盘分析报告，包含定性分析和量化指标。
@@ -19,8 +30,11 @@ export async function POST(req: Request) {
 面试记录（最近 10 条）：
 ${JSON.stringify(interviewRecords?.slice(0, 10) || [], null, 2).slice(0, 3000)}
 
-模拟面试问答（最近 20 条）：
-${JSON.stringify(mockQuestions?.slice(0, 20) || [], null, 2).slice(0, 4000)}
+模拟面试问答（旧版，最近 20 条）：
+${JSON.stringify(mockQuestions?.slice(0, 20) || [], null, 2).slice(0, 3000)}
+
+模拟面试记录（新版，含评分和维度，最近 10 条）：
+${JSON.stringify(mockInterviewSummary, null, 2).slice(0, 3000)}
 
 请从以下维度进行分析：
 

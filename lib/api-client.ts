@@ -152,9 +152,9 @@ export const api = {
 
   // Resumes
   getResumes: () => apiGet<Record<string, unknown>[]>('/api/data/resumes'),
-  createResume: (data: { file_name: string; file_url?: string; extracted_text?: string }) =>
+  createResume: (data: { file_name: string; file_url?: string; extracted_text?: string; version_label?: string }) =>
     apiPost<Record<string, unknown>>('/api/data/resumes', data),
-  updateResume: (data: { id: string; extracted_text?: string; file_name?: string }) =>
+  updateResume: (data: { id: string; extracted_text?: string; file_name?: string; version_label?: string }) =>
     apiPut<Record<string, unknown>>('/api/data/resumes', data),
   deleteResume: (id: string) => apiDelete(`/api/data/resumes?id=${id}`),
 
@@ -195,6 +195,21 @@ export const api = {
     apiPost<Record<string, unknown>>('/api/data/audio-records', data),
   updateAudioRecord: (data: { id: string; status?: string; transcription?: string; qa_segments?: unknown; analysis?: unknown }) =>
     apiPut<Record<string, unknown>>('/api/data/audio-records', data),
+
+  // Mock Interview Records
+  getMockInterviewRecords: () => apiGet<Record<string, unknown>[]>('/api/data/mock-interview-records'),
+  getMockInterviewRecord: (id: string) => apiGet<Record<string, unknown>>(`/api/data/mock-interview-records?id=${id}`),
+  createMockInterviewRecord: (data: {
+    position: string
+    settings: Record<string, unknown>
+    messages: unknown[]
+    overall_score: number
+    overall_feedback: string
+    dimensions: { name: string; score: number }[]
+    duration: number
+    question_count: number
+  }) => apiPost<Record<string, unknown>>('/api/data/mock-interview-records', data),
+  deleteMockInterviewRecord: (id: string) => apiDelete(`/api/data/mock-interview-records?id=${id}`),
 
   // Sprint Records
   getSprintRecords: () => apiGet<Record<string, unknown>[]>('/api/data/sprint-records'),

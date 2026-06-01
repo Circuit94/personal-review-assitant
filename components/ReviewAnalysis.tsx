@@ -233,11 +233,14 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
       const interviewRecordsRaw = await api.getInterviewRecords()
       const interviewRecords = (interviewRecordsRaw || []).slice(0, 10)
 
-      // 2. 获取模拟面试数据
+      // 2. 获取新版模拟面试记录（带反馈和评分）
+      const mockInterviewRecordsRaw = await api.getMockInterviewRecords()
+      const mockInterviewRecords = (mockInterviewRecordsRaw || []).slice(0, 10)
+
+      // 3. 获取旧版模拟面试数据（向后兼容）
       const mockSessionsRaw = await api.getChatSessions('mock_interview')
       const mockSessions = mockSessionsRaw || []
 
-      // 3. 对每个 session 获取模拟面试题目
       let allMockQuestions: any[] = []
       for (const session of mockSessions) {
         try {
@@ -251,11 +254,11 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
       }
       allMockQuestions = allMockQuestions.slice(0, 20)
 
-      if (interviewRecords.length === 0 && allMockQuestions.length === 0) {
+      if (interviewRecords.length === 0 && allMockQuestions.length === 0 && mockInterviewRecords.length === 0) {
         throw new Error('暂无足够的面试记录或模拟面试数据来进行分析，请先记录面试或开始模拟面试。')
       }
 
-      // 4. 调用 API 生成分析报告
+      // 4. 调用 API 生成分析报告（传入新版模拟面试数据）
       const token = getToken()
       const response = await fetch('/api/generate-review-analysis', {
         method: 'POST',
@@ -263,7 +266,11 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ interviewRecords, mockQuestions: allMockQuestions }),
+        body: JSON.stringify({
+          interviewRecords,
+          mockQuestions: allMockQuestions,
+          mockInterviewRecords,
+        }),
       })
 
       if (!response.ok) {

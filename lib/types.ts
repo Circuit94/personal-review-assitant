@@ -8,6 +8,7 @@ export interface Resume {
   file_type: string
   file_size: number
   extracted_text: string
+  version_label: string       // 版本标签，如 "互联网版"、"国企版"
   created_at: string
   updated_at: string
 }
@@ -101,6 +102,54 @@ export interface ReviewAnalysisRecord {
   weaknesses: string[]
   suggestions: string[]
   created_at: string
+}
+
+// ============ 模拟面试增强类型 ============
+
+export interface MockInterviewSettings {
+  position: string
+  skipIntro: boolean          // 跳过自我介绍
+  focusAreas: string[]        // 重点考察方向，如 '项目经验'、'技术深度'、'行为面试'
+  difficulty: 'easy' | 'medium' | 'hard'
+  questionCount: number       // 预计问题数
+  customInstructions?: string // 用户自定义指令
+}
+
+export interface InterviewFeedback {
+  score: number               // 0-100
+  framework: string           // 回答框架分析（如 STAR 法则使用情况）
+  strengths: string[]
+  improvements: string[]
+  optimizedAnswer: string     // AI 优化版答案
+}
+
+export interface InterviewOption {
+  id: string
+  label: string               // 如 "追问项目细节"、"换方向提问"、"结束面试"
+  type: 'followup' | 'switch_topic' | 'end' | 'custom'
+}
+
+export interface MockInterviewMessage {
+  role: 'interviewer' | 'candidate'
+  content: string
+  timestamp: number
+  feedback?: InterviewFeedback  // 候选人回答后的实时反馈
+  options?: InterviewOption[]   // 面试官提问后的选项
+}
+
+export interface MockInterviewRecord {
+  id: string
+  user_id: string
+  position: string
+  settings: MockInterviewSettings
+  messages: MockInterviewMessage[]
+  overall_score: number
+  overall_feedback: string
+  dimensions: { name: string; score: number }[]
+  duration: number            // 秒
+  question_count: number
+  created_at: string
+  updated_at: string
 }
 
 export interface SprintTask {

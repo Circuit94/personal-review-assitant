@@ -28,6 +28,8 @@ import {
   ArrowRight,
   X,
   FileText,
+  Wand2,
+  RotateCw,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -296,14 +298,19 @@ export function MockInterview({ userId }: { userId: string }) {
   const [lastInterviewerQuestion, setLastInterviewerQuestion] = useState('')
 
   // 设置
-  const [settings, setSettings] = useState<MockInterviewSettings>({
+  const DEFAULT_SETTINGS: MockInterviewSettings = {
     position: '',
     skipIntro: false,
     focusAreas: [],
     difficulty: 'medium',
     questionCount: 10,
     customInstructions: '',
-  })
+  }
+  const [settings, setSettings] = useState<MockInterviewSettings>(DEFAULT_SETTINGS)
+  const [company, setCompany] = useState('')
+  const [jdText, setJdText] = useState('')
+  const [recommending, setRecommending] = useState(false)
+  const [hasRecommended, setHasRecommended] = useState(false)
 
   // 简历
   const [resumes, setResumes] = useState<Resume[]>([])
@@ -799,6 +806,59 @@ export function MockInterview({ userId }: { userId: string }) {
     }
   }
 
+  // 智能推荐设置
+  const handleRecommendSettings = async () => {
+    if (!settings.position && !jdText.trim()) {
+      toast({ title: '请先填写岗位名称或粘贴 JD' })
+      return
+    }
+    setRecommending(true)
+    try {
+      const token = getToken()
+      const res = await fetch('/api/mock-interview/recommend-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          company,
+          position: settings.position,
+          jd: jdText,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || '推荐失败')
+      }
+      const recommended = await res.json()
+      setSettings({
+        position: recommended.position || settings.position,
+        skipIntro: recommended.skipIntro,
+        focusAreas: recommended.focusAreas,
+        difficulty: recommended.difficulty,
+        questionCount: recommended.questionCount,
+        customInstructions: recommended.customInstructions || '',
+      })
+      setHasRecommended(true)
+      toast({ title: '已智能推荐设置', description: '可根据需要继续调整' })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '推荐设置失败'
+      toast({ title: '推荐失败', description: message, variant: 'destructive' })
+    } finally {
+      setRecommending(false)
+    }
+  }
+
+  // 重置设置
+  const handleResetSettings = () => {
+    setSettings(DEFAULT_SETTINGS)
+    setCompany('')
+    setJdText('')
+    setHasRecommended(false)
+    toast({ title: '设置已重置' })
+  }
+
   // textarea 自适应高度
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value)
@@ -901,22 +961,79 @@ export function MockInterview({ userId }: { userId: string }) {
         {/* 设置卡片 */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Settings2 className="h-4 w-4" />
-              面试设置
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Settings2 className="h-4 w-4" />
+                面试设置
+              </CardTitle>
+              {hasRecommended && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleResetSettings}>
+                  <RotateCw className="h-3 w-3 mr-1" />
+                  重置
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* 岗位 */}
+            {/* 公司 + 岗位 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">目标公司</label>
+                <Input
+                  placeholder="如：字节跳动 / 美团 / 腾讯"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  className="h-10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">目标岗位 *</label>
+                <Input
+                  placeholder="如：高级前端工程师"
+                  value={settings.position}
+                  onChange={(e) => setSettings({ ...settings, position: e.target.value })}
+                  className="h-10"
+                />
+              </div>
+            </div>
+
+            {/* JD 粘贴区 */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">目标岗位 *</label>
-              <Input
-                placeholder="如：高级前端工程师 / 产品经理 / 数据分析师"
-                value={settings.position}
-                onChange={(e) => setSettings({ ...settings, position: e.target.value })}
-                className="h-11"
+              <label className="text-sm font-medium">岗位 JD（可选）</label>
+              <Textarea
+                placeholder="粘贴岗位描述/职位要求，AI 将根据 JD 自动推荐面试设置..."
+                value={jdText}
+                onChange={(e) => setJdText(e.target.value)}
+                rows={3}
+                className="text-sm resize-none"
               />
             </div>
+
+            {/* 智能推荐按钮 */}
+            <Button
+              variant="outline"
+              className="w-full h-10 border-dashed border-blue-300 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+              onClick={handleRecommendSettings}
+              disabled={recommending || (!settings.position && !jdText.trim())}
+            >
+              {recommending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  正在分析 JD 并推荐设置...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="mr-2 h-4 w-4" />
+                  智能推荐面试设置
+                </>
+              )}
+            </Button>
+
+            {hasRecommended && (
+              <p className="text-xs text-blue-600 bg-blue-50 rounded-lg px-3 py-2">
+                已根据岗位信息智能推荐设置，你可以继续自定义调整下方各项参数
+              </p>
+            )}
 
             {/* 难度 */}
             <div className="space-y-1.5">

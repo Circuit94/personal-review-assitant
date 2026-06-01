@@ -13,7 +13,13 @@ export async function GET(req: Request) {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    // 表不存在时返回空数组而非报错
+    if (error.message.includes('schema cache') || error.code === '42P01') {
+      return NextResponse.json([])
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
   return NextResponse.json(records)
 }
 

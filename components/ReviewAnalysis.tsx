@@ -255,7 +255,9 @@ export function ReviewAnalysis({ userId }: { userId: string }) {
       allMockQuestions = allMockQuestions.slice(0, 20)
 
       if (interviewRecords.length === 0 && allMockQuestions.length === 0 && mockInterviewRecords.length === 0) {
-        throw new Error('暂无足够的面试记录或模拟面试数据来进行分析，请先记录面试或开始模拟面试。')
+        toast({ title: '数据不足', description: '暂无面试记录或模拟面试数据，请先记录面试或开始模拟面试。' })
+        setGenerating(false)
+        return
       }
 
       // 4. 调用 API 生成分析报告（传入新版模拟面试数据）

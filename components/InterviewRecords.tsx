@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { api } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,6 +18,8 @@ import {
   Calendar,
   Columns3,
   GripVertical,
+  Bell,
+  BellRing,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -136,6 +138,10 @@ export function InterviewRecords({ userId }: { userId: string }) {
   const [editingRecord, setEditingRecord] = useState<InterviewRecord | null>(null)
   const { toast } = useToast()
 
+  // 拖拽状态
+  const [draggedRecord, setDraggedRecord] = useState<InterviewRecord | null>(null)
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null)
+
   // 表单状态
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -153,11 +159,56 @@ export function InterviewRecords({ userId }: { userId: string }) {
     fetchRecords()
   }, [])
 
+  // 面试提醒：检测即将到来的面试
+  const checkUpcomingInterviews = useCallback((recordsList: InterviewRecord[]) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+
+    const now = new Date()
+    const todayStr = formatDate(now.getFullYear(), now.getMonth(), now.getDate())
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowStr = formatDate(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate())
+
+    const upcoming = recordsList.filter((r) => {
+      if (!r.interview_date) return false
+      return r.interview_date === todayStr || r.interview_date === tomorrowStr
+    })
+
+    if (upcoming.length === 0) return
+
+    // 请求通知权限并发送
+    if (Notification.permission === 'granted') {
+      upcoming.forEach((r) => {
+        const isToday = r.interview_date === todayStr
+        new Notification(`📋 面试${isToday ? '今天' : '明天'}`, {
+          body: `${r.company ? r.company + ' - ' : ''}${r.position || r.title}`,
+          icon: '/favicon.ico',
+          tag: `interview-${r.id}`,
+        })
+      })
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          upcoming.forEach((r) => {
+            const isToday = r.interview_date === todayStr
+            new Notification(`📋 面试${isToday ? '今天' : '明天'}`, {
+              body: `${r.company ? r.company + ' - ' : ''}${r.position || r.title}`,
+              icon: '/favicon.ico',
+              tag: `interview-${r.id}`,
+            })
+          })
+        }
+      })
+    }
+  }, [])
+
   const fetchRecords = async () => {
     try {
       setLoading(true)
       const data = await api.getInterviewRecords()
-      setRecords((data || []) as unknown as InterviewRecord[])
+      const recordsList = (data || []) as unknown as InterviewRecord[]
+      setRecords(recordsList)
+      checkUpcomingInterviews(recordsList)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : '获取失败'
       console.error('获取面试记录失败:', error)
@@ -191,6 +242,44 @@ export function InterviewRecords({ userId }: { userId: string }) {
     })
     return map
   }, [records])
+
+  // 拖拽处理
+  const handleDragStart = (record: InterviewRecord) => {
+    setDraggedRecord(record)
+  }
+
+  const handleDragOver = (e: React.DragEvent, stageKey: string) => {
+    e.preventDefault()
+    setDragOverStage(stageKey)
+  }
+
+  const handleDragLeave = () => {
+    setDragOverStage(null)
+  }
+
+  const handleDrop = async (targetStage: string) => {
+    setDragOverStage(null)
+    if (!draggedRecord || draggedRecord.stage === targetStage) {
+      setDraggedRecord(null)
+      return
+    }
+
+    // 乐观更新 UI
+    const prevRecords = [...records]
+    setRecords(records.map((r) =>
+      r.id === draggedRecord.id ? { ...r, stage: targetStage } : r
+    ))
+    setDraggedRecord(null)
+
+    try {
+      await api.updateInterviewRecord({ id: draggedRecord.id, stage: targetStage })
+      toast({ title: '已移动', description: `${draggedRecord.title} → ${STAGES.find(s => s.key === targetStage)?.label}` })
+    } catch {
+      // 回滚
+      setRecords(prevRecords)
+      toast({ title: '移动失败', description: '请重试', variant: 'destructive' })
+    }
+  }
 
   // 生成日历网格
   const calendarDays = useMemo(() => {
@@ -392,6 +481,35 @@ export function InterviewRecords({ userId }: { userId: string }) {
             </div>
           )}
 
+          {/* 通知开关 */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            onClick={() => {
+              if ('Notification' in window) {
+                if (Notification.permission === 'granted') {
+                  toast({ title: '通知已开启', description: '面试前一天和当天会收到浏览器提醒' })
+                } else {
+                  Notification.requestPermission().then((p) => {
+                    if (p === 'granted') {
+                      toast({ title: '通知已开启', description: '面试前一天和当天会收到浏览器提醒' })
+                    } else {
+                      toast({ title: '通知被拒绝', description: '请在浏览器设置中开启通知权限', variant: 'destructive' })
+                    }
+                  })
+                }
+              }
+            }}
+            title="开启面试提醒通知"
+          >
+            {typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' ? (
+              <BellRing className="h-4 w-4 text-green-600" />
+            ) : (
+              <Bell className="h-4 w-4" />
+            )}
+          </Button>
+
           <Button onClick={() => openFormForDate(today)} size="sm" className="ml-2">
             <Plus className="mr-1 h-4 w-4" />
             新增记录
@@ -404,10 +522,16 @@ export function InterviewRecords({ userId }: { userId: string }) {
         <div className="flex gap-3 overflow-x-auto pb-4">
           {STAGES.map((stageInfo) => {
             const stageRecords = recordsByStage[stageInfo.key] || []
+            const isDragOver = dragOverStage === stageInfo.key
             return (
               <div
                 key={stageInfo.key}
-                className="flex-shrink-0 w-[240px] bg-gray-50 dark:bg-gray-900 rounded-xl border"
+                className={`flex-shrink-0 w-[240px] bg-gray-50 dark:bg-gray-900 rounded-xl border transition-all ${
+                  isDragOver ? 'ring-2 ring-blue-400 bg-blue-50/50 dark:bg-blue-950/20' : ''
+                }`}
+                onDragOver={(e) => handleDragOver(e, stageInfo.key)}
+                onDragLeave={handleDragLeave}
+                onDrop={() => handleDrop(stageInfo.key)}
               >
                 {/* 列头 */}
                 <div className="flex items-center justify-between px-3 py-2.5 border-b">
@@ -432,10 +556,16 @@ export function InterviewRecords({ userId }: { userId: string }) {
                 <div className="p-2 space-y-2 min-h-[200px] max-h-[calc(100vh-20rem)] overflow-y-auto">
                   {stageRecords.map((record) => {
                     const color = getColorForCompany(record.company, 0)
+                    const isDragging = draggedRecord?.id === record.id
                     return (
                       <div
                         key={record.id}
-                        className="bg-white dark:bg-gray-800 rounded-lg border shadow-sm p-3 cursor-pointer hover:shadow-md transition-shadow group"
+                        draggable
+                        onDragStart={() => handleDragStart(record)}
+                        onDragEnd={() => setDraggedRecord(null)}
+                        className={`bg-white dark:bg-gray-800 rounded-lg border shadow-sm p-3 cursor-grab hover:shadow-md transition-all group ${
+                          isDragging ? 'opacity-50 scale-95 ring-2 ring-blue-300' : ''
+                        }`}
                         onClick={() => setShowDetail(record)}
                       >
                         <div className="flex items-start justify-between">

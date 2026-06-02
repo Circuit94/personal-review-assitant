@@ -312,6 +312,13 @@ export function MockInterview({ userId }: { userId: string }) {
   const [recommending, setRecommending] = useState(false)
   const [hasRecommended, setHasRecommended] = useState(false)
 
+  // 计时压力模式
+  const [timerMode, setTimerMode] = useState(false)
+  const [answerTimeLimit, setAnswerTimeLimit] = useState(120) // 默认 2 分钟
+  const [answerTimer, setAnswerTimer] = useState(0)
+  const [isTimerWarning, setIsTimerWarning] = useState(false)
+  const answerTimerRef = useRef<NodeJS.Timeout | null>(null)
+
   // 简历
   const [resumes, setResumes] = useState<Resume[]>([])
   const [selectedResumeId, setSelectedResumeId] = useState<string>('')
@@ -384,6 +391,30 @@ export function MockInterview({ userId }: { userId: string }) {
       }
     }
   }, [phase])
+
+  // 回答计时器（压力模式）
+  useEffect(() => {
+    if (timerMode && phase === 'ongoing' && !isStreaming && messages.length > 0) {
+      // AI 说完话后开始计时
+      setAnswerTimer(0)
+      setIsTimerWarning(false)
+      answerTimerRef.current = setInterval(() => {
+        setAnswerTimer((prev) => {
+          const next = prev + 1
+          if (next >= answerTimeLimit - 30 && !isTimerWarning) {
+            setIsTimerWarning(true)
+          }
+          return next
+        })
+      }, 1000)
+    }
+    return () => {
+      if (answerTimerRef.current) {
+        clearInterval(answerTimerRef.current)
+        answerTimerRef.current = null
+      }
+    }
+  }, [timerMode, phase, isStreaming, messages.length, answerTimeLimit, isTimerWarning])
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -1169,6 +1200,46 @@ export function MockInterview({ userId }: { userId: string }) {
                 className="text-sm"
               />
             </div>
+
+            {/* 计时压力模式 */}
+            <div className="space-y-2 pt-3 border-t">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Timer className="h-4 w-4 text-orange-500" />
+                  <label className="text-sm font-medium">计时压力模式</label>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTimerMode(!timerMode)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    timerMode ? 'bg-orange-500' : 'bg-gray-200'
+                  }`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    timerMode ? 'translate-x-4.5' : 'translate-x-0.5'
+                  }`} />
+                </button>
+              </div>
+              {timerMode && (
+                <div className="space-y-1.5 pl-6">
+                  <p className="text-xs text-muted-foreground">每道题限时回答，超时有视觉警告</p>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground">每题时限：</label>
+                    <select
+                      className="h-7 px-2 rounded border text-xs bg-background"
+                      value={answerTimeLimit}
+                      onChange={(e) => setAnswerTimeLimit(Number(e.target.value))}
+                    >
+                      <option value={60}>1 分钟</option>
+                      <option value={90}>1.5 分钟</option>
+                      <option value={120}>2 分钟</option>
+                      <option value={180}>3 分钟</option>
+                      <option value={300}>5 分钟</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -1238,6 +1309,25 @@ export function MockInterview({ userId }: { userId: string }) {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* 回答倒计时（压力模式） */}
+          {timerMode && phase === 'ongoing' && !isStreaming && !isInterviewEnded && (
+            <div className={`flex items-center gap-1.5 text-sm px-2 py-0.5 rounded-full transition-all ${
+              answerTimer >= answerTimeLimit
+                ? 'bg-red-100 text-red-700 animate-pulse'
+                : isTimerWarning
+                  ? 'bg-orange-100 text-orange-700'
+                  : 'bg-gray-100 text-gray-600'
+            }`}>
+              <Timer className="h-3.5 w-3.5" />
+              <span className="font-mono text-xs">
+                {formatTime(Math.max(answerTimeLimit - answerTimer, 0))}
+              </span>
+              {answerTimer >= answerTimeLimit && (
+                <span className="text-[10px]">超时!</span>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Timer className="h-4 w-4" />
             <span className="font-mono">{formatTime(elapsedTime)}</span>

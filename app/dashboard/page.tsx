@@ -26,6 +26,7 @@ import {
   TrendingUp,
   Database,
   Zap,
+  FolderOpen,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -74,7 +75,7 @@ function getRecommendedActions(stats: DashboardStats): RecommendedAction[] {
     actions.push({
       title: '上传简历',
       description: 'AI 将基于简历生成针对性面试题',
-      tab: 'resume',
+      tab: 'resume-hub',
       icon: <FileText className="h-5 w-5 text-blue-600" />,
       iconBg: 'bg-blue-100',
       borderColor: 'border-l-blue-500',
@@ -109,7 +110,7 @@ function getRecommendedActions(stats: DashboardStats): RecommendedAction[] {
       {
         title: '面试冲刺准备',
         description: '为即将到来的面试生成 30 分钟清单',
-        tab: 'sprint',
+        tab: 'overview',
         icon: <Zap className="h-5 w-5 text-amber-600" />,
         iconBg: 'bg-amber-100',
         borderColor: 'border-l-amber-500',
@@ -125,7 +126,7 @@ function getRecommendedActions(stats: DashboardStats): RecommendedAction[] {
       {
         title: '生成复盘报告',
         description: '分析进步趋势和薄弱环节',
-        tab: 'analysis',
+        tab: 'review',
         icon: <TrendingUp className="h-5 w-5 text-indigo-600" />,
         iconBg: 'bg-indigo-100',
         borderColor: 'border-l-indigo-500',
@@ -146,6 +147,10 @@ export default function Dashboard() {
     mockCount: 0,
     audioCount: 0,
   })
+  // 子 Tab 状态
+  const [resumeSubTab, setResumeSubTab] = useState<'resumes' | 'infobank'>('resumes')
+  const [reviewSubTab, setReviewSubTab] = useState<'records' | 'analysis'>('records')
+
   useEffect(() => {
     checkUser()
   }, [])
@@ -230,40 +235,25 @@ export default function Dashboard() {
                 <span className="hidden sm:inline">模拟面试</span>
                 <span className="sm:hidden">模拟</span>
               </TabsTrigger>
-              <TabsTrigger value="resume" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
-                <FileText className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">简历管理</span>
-                <span className="sm:hidden">简历</span>
+              <TabsTrigger value="resume-hub" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
+                <FolderOpen className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">简历素材</span>
+                <span className="sm:hidden">素材</span>
               </TabsTrigger>
               <TabsTrigger value="records" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <History className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">面试记录</span>
                 <span className="sm:hidden">记录</span>
               </TabsTrigger>
-              <TabsTrigger value="audio" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
-                <MessageSquareText className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">面试复盘</span>
-                <span className="sm:hidden">复盘</span>
-              </TabsTrigger>
-              <TabsTrigger value="analysis" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
+              <TabsTrigger value="review" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
                 <BarChart3 className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">复盘分析</span>
                 <span className="sm:hidden">复盘</span>
               </TabsTrigger>
-              <TabsTrigger value="sprint" className="data-[state=active]:bg-amber-50 data-[state=active]:text-amber-600 px-3 sm:px-6 text-xs sm:text-sm">
-                <Zap className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">面试冲刺</span>
-                <span className="sm:hidden">冲刺</span>
-              </TabsTrigger>
-              <TabsTrigger value="infobank" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 px-3 sm:px-6 text-xs sm:text-sm">
-                <Database className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">信息库</span>
-                <span className="sm:hidden">信息</span>
-              </TabsTrigger>
             </TabsList>
           </div>
 
-          {/* 概览页 - 任务导向 */}
+          {/* 概览页 - 含面试冲刺 */}
           <TabsContent value="overview" className="mt-0">
             <div className="space-y-6">
               {/* 面试准备度评分 */}
@@ -317,7 +307,7 @@ export default function Dashboard() {
 
               {/* 数据概览 */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('resume')}>
+                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('resume-hub')}>
                   <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -350,7 +340,7 @@ export default function Dashboard() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('audio')}>
+                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('review')}>
                   <CardContent className="pt-5 pb-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -365,11 +355,6 @@ export default function Dashboard() {
 
               {/* 快捷入口 */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-5 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('sprint')}>
-                  <Zap className="h-7 w-7 text-amber-500 mb-3" />
-                  <h3 className="font-bold">面试冲刺</h3>
-                  <p className="text-xs text-muted-foreground mt-1">30 分钟快速准备，AI 定制清单</p>
-                </div>
                 <div className="p-5 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('mock')}>
                   <Play className="h-7 w-7 text-green-500 mb-3" />
                   <h3 className="font-bold">模拟面试</h3>
@@ -380,33 +365,100 @@ export default function Dashboard() {
                   <h3 className="font-bold">AI 辅导</h3>
                   <p className="text-xs text-muted-foreground mt-1">个性化面试辅导，基于你的简历</p>
                 </div>
+                <div className="p-5 bg-white dark:bg-gray-800 rounded-xl border shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => setActiveTab('review')}>
+                  <BarChart3 className="h-7 w-7 text-indigo-500 mb-3" />
+                  <h3 className="font-bold">复盘分析</h3>
+                  <p className="text-xs text-muted-foreground mt-1">分析进步趋势，找出薄弱环节</p>
+                </div>
+              </div>
+
+              {/* 面试冲刺 - 直接嵌入概览页 */}
+              <div className="border-t pt-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Zap className="h-5 w-5 text-amber-500" />
+                  <h3 className="text-lg font-bold">面试冲刺</h3>
+                  <span className="text-xs text-muted-foreground">— 为即将到来的面试快速准备</span>
+                </div>
+                <InterviewSprint userId={user!.id} />
               </div>
             </div>
           </TabsContent>
 
+          {/* AI 聊天 */}
           <TabsContent value="chat" className="mt-0">
             <AIChat userId={user!.id} />
           </TabsContent>
+
+          {/* 模拟面试 */}
           <TabsContent value="mock" className="mt-0">
             <MockInterview userId={user!.id} />
           </TabsContent>
-          <TabsContent value="resume" className="mt-0">
-            <ResumeManager userId={user!.id} />
+
+          {/* 简历素材 - 合并简历管理 + 信息库 */}
+          <TabsContent value="resume-hub" className="mt-0">
+            <div className="space-y-4">
+              <div className="flex gap-2 border-b pb-3">
+                <Button
+                  variant={resumeSubTab === 'resumes' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setResumeSubTab('resumes')}
+                  className="gap-1.5"
+                >
+                  <FileText className="h-4 w-4" />
+                  简历管理
+                </Button>
+                <Button
+                  variant={resumeSubTab === 'infobank' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setResumeSubTab('infobank')}
+                  className="gap-1.5"
+                >
+                  <Database className="h-4 w-4" />
+                  素材库
+                </Button>
+              </div>
+              {resumeSubTab === 'resumes' ? (
+                <ResumeManager userId={user!.id} />
+              ) : (
+                <PersonalInfoBank userId={user!.id} />
+              )}
+            </div>
           </TabsContent>
+
+          {/* 面试记录 */}
           <TabsContent value="records" className="mt-0">
             <InterviewRecords userId={user!.id} />
           </TabsContent>
-          <TabsContent value="audio" className="mt-0">
-            <AudioInterviewSystem userId={user!.id} />
-          </TabsContent>
-          <TabsContent value="analysis" className="mt-0">
-            <ReviewAnalysis userId={user!.id} />
-          </TabsContent>
-          <TabsContent value="sprint" className="mt-0">
-            <InterviewSprint userId={user!.id} />
-          </TabsContent>
-          <TabsContent value="infobank" className="mt-0">
-            <PersonalInfoBank userId={user!.id} />
+
+          {/* 复盘分析 - 合并面试复盘 + 综合分析 */}
+          <TabsContent value="review" className="mt-0">
+            <div className="space-y-4">
+              <div className="flex gap-2 border-b pb-3">
+                <Button
+                  variant={reviewSubTab === 'records' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setReviewSubTab('records')}
+                  className="gap-1.5"
+                >
+                  <MessageSquareText className="h-4 w-4" />
+                  面试复盘
+                </Button>
+                <Button
+                  variant={reviewSubTab === 'analysis' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setReviewSubTab('analysis')}
+                  className="gap-1.5"
+                >
+                  <TrendingUp className="h-4 w-4" />
+                  综合分析
+                </Button>
+              </div>
+              {reviewSubTab === 'records' ? (
+                <AudioInterviewSystem userId={user!.id} />
+              ) : (
+                <ReviewAnalysis userId={user!.id} />
+              )}
+            </div>
           </TabsContent>
         </Tabs>
       </main>

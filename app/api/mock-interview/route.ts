@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { openai, MODEL } from '@/lib/openai'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { verifyToken } from '@/lib/auth'
+import supabaseAdmin from '@/lib/db'
 
 // 面试官系统提示词（根据设置动态生成）
 function buildInterviewerPrompt(settings: {
@@ -68,6 +70,39 @@ ${settings.customInstructions ? `\n## 用户自定义要求\n${settings.customIn
 ${settings.resumeText ? `候选人简历摘要：${settings.resumeText.slice(0, 2000)}` : '无简历信息，进行通用面试'}`
 }
 
+/**
+ * 获取用户信息库上下文（项目经历、技能特长等）注入面试官
+ */
+async function getInfoBankContext(userId: string): Promise<string> {
+  try {
+    const { data: infoFields } = await supabaseAdmin
+      .from('info_fields')
+      .select('label, value, module_id')
+      .eq('user_id', userId)
+      .neq('value', '')
+      .limit(20)
+
+    if (!infoFields || infoFields.length === 0) return ''
+
+    const moduleIds = [...new Set(infoFields.map((f) => f.module_id))]
+    const { data: modules } = await supabaseAdmin
+      .from('info_modules')
+      .select('id, name')
+      .in('id', moduleIds)
+
+    const moduleMap = new Map((modules || []).map((m) => [m.id, m.name]))
+
+    const infoSummary = infoFields.map((f) =>
+      `- [${moduleMap.get(f.module_id) || '其他'}] ${f.label}: ${(f.value as string).slice(0, 200)}`
+    ).join('\n')
+
+    return `\n\n## 候选人背景补充（来自个人素材库）\n${infoSummary}`
+  } catch (error) {
+    console.error('Failed to load info bank for mock:', error)
+    return ''
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const ip = req.headers.get('x-forwarded-for') || 'unknown'
@@ -92,10 +127,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: '缺少岗位信息' }, { status: 400 })
     }
 
+    // 尝试获取用户身份，注入信息库上下文
+    let infoBankContext = ''
+    const authHeader = req.headers.get('authorization')
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '')
+      const payload = verifyToken(token)
+      if (payload?.id) {
+        infoBankContext = await getInfoBankContext(payload.id)
+      }
+    }
+
     // 构建系统提示词
     const interviewSettings = {
       position,
-      resumeText,
+      resumeText: resumeText ? `${resumeText}${infoBankContext}` : (infoBankContext || undefined),
       skipIntro: settings?.skipIntro ?? false,
       focusAreas: settings?.focusAreas ?? [],
       difficulty: settings?.difficulty ?? 'medium',

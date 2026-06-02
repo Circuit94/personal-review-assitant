@@ -18,12 +18,26 @@ import {
   Check,
   X,
   Plus,
+  Target,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle2,
+  Sparkles,
 } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import type { Resume } from '@/lib/types'
 
 const PRESET_LABELS = ['互联网', '国企', '外企', '金融', '通用']
+
+interface JdMatchResult {
+  score: number
+  summary: string
+  matchedKeywords: string[]
+  missingKeywords: string[]
+  strengths: string[]
+  suggestions: string[]
+}
 
 export function ResumeManager({ userId }: { userId: string }) {
   const [resumes, setResumes] = useState<Resume[]>([])
@@ -36,6 +50,12 @@ export function ResumeManager({ userId }: { userId: string }) {
   const [editLabel, setEditLabel] = useState('')
   const [uploadLabel, setUploadLabel] = useState('')
   const [showUploadLabel, setShowUploadLabel] = useState(false)
+  // JD 匹配度分析
+  const [showJdMatch, setShowJdMatch] = useState(false)
+  const [jdText, setJdText] = useState('')
+  const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null)
+  const [jdMatchLoading, setJdMatchLoading] = useState(false)
+  const [jdMatchResult, setJdMatchResult] = useState<JdMatchResult | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -158,6 +178,51 @@ export function ResumeManager({ userId }: { userId: string }) {
     }
   }
 
+  // JD 匹配度分析
+  const handleJdMatch = async () => {
+    if (!jdText.trim()) {
+      toast({ title: '请输入 JD 内容', variant: 'destructive' })
+      return
+    }
+
+    const resume = resumes.find((r) => r.id === selectedResumeId)
+    if (!resume?.extracted_text) {
+      toast({ title: '请选择一份已解析的简历', variant: 'destructive' })
+      return
+    }
+
+    setJdMatchLoading(true)
+    setJdMatchResult(null)
+
+    try {
+      const token = getToken()
+      const res = await fetch('/api/resume/jd-match', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          resumeText: resume.extracted_text,
+          jdText: jdText.trim(),
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || '分析失败')
+      }
+
+      const result = await res.json()
+      setJdMatchResult(result)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '分析失败'
+      toast({ title: '匹配分析失败', description: message, variant: 'destructive' })
+    } finally {
+      setJdMatchLoading(false)
+    }
+  }
+
   // 按版本标签分组
   const groupedResumes = resumes.reduce<Record<string, Resume[]>>((acc, resume) => {
     const label = resume.version_label || '默认'
@@ -179,6 +244,153 @@ export function ResumeManager({ userId }: { userId: string }) {
           共 {resumes.length} 份简历
         </Badge>
       </div>
+
+      {/* JD 匹配度分析 */}
+      <Card className="border-blue-100 bg-gradient-to-r from-blue-50/50 to-indigo-50/50">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-blue-600" />
+              <CardTitle className="text-base">JD 匹配度分析</CardTitle>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setShowJdMatch(!showJdMatch); setJdMatchResult(null) }}
+            >
+              {showJdMatch ? '收起' : '展开分析'}
+            </Button>
+          </div>
+          {!showJdMatch && (
+            <p className="text-xs text-muted-foreground mt-1">
+              粘贴目标岗位 JD，AI 自动分析简历匹配度并给出优化建议
+            </p>
+          )}
+        </CardHeader>
+        {showJdMatch && (
+          <CardContent className="space-y-4">
+            {/* 选择简历 */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">选择简历</label>
+              <select
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                value={selectedResumeId || ''}
+                onChange={(e) => setSelectedResumeId(e.target.value || null)}
+              >
+                <option value="">-- 选择一份简历 --</option>
+                {resumes.filter((r) => r.extracted_text).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.file_name} ({r.version_label || '默认'})
+                  </option>
+                ))}
+              </select>
+              {resumes.filter(r => r.extracted_text).length === 0 && (
+                <p className="text-xs text-amber-600">暂无已解析的简历，请先上传简历并等待文本提取完成</p>
+              )}
+            </div>
+
+            {/* JD 输入 */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">目标岗位 JD</label>
+              <Textarea
+                placeholder="粘贴完整的岗位描述 (Job Description)..."
+                value={jdText}
+                onChange={(e) => setJdText(e.target.value)}
+                className="min-h-[120px] text-sm"
+              />
+            </div>
+
+            <Button
+              onClick={handleJdMatch}
+              disabled={jdMatchLoading || !selectedResumeId || !jdText.trim()}
+              className="w-full"
+            >
+              {jdMatchLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  AI 分析中...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  分析匹配度
+                </>
+              )}
+            </Button>
+
+            {/* 分析结果 */}
+            {jdMatchResult && (
+              <div className="space-y-4 pt-4 border-t">
+                {/* 评分 */}
+                <div className="flex items-center gap-4">
+                  <div className={`text-4xl font-bold ${
+                    jdMatchResult.score >= 70 ? 'text-green-600' :
+                    jdMatchResult.score >= 50 ? 'text-amber-600' : 'text-red-600'
+                  }`}>
+                    {jdMatchResult.score}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">匹配度评分</p>
+                    <p className="text-xs text-muted-foreground">{jdMatchResult.summary}</p>
+                  </div>
+                </div>
+
+                {/* 匹配关键词 */}
+                {jdMatchResult.matchedKeywords.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-700">匹配的关键词</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {jdMatchResult.matchedKeywords.map((kw, i) => (
+                        <Badge key={i} variant="secondary" className="bg-green-50 text-green-700 text-xs">
+                          {kw}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 缺失关键词 */}
+                {jdMatchResult.missingKeywords.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      <span className="text-sm font-medium text-amber-700">缺失的关键词</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {jdMatchResult.missingKeywords.map((kw, i) => (
+                        <Badge key={i} variant="secondary" className="bg-amber-50 text-amber-700 text-xs">
+                          {kw}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 优化建议 */}
+                {jdMatchResult.suggestions.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <TrendingUp className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-700">优化建议</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {jdMatchResult.suggestions.map((s, i) => (
+                        <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                          <span className="text-blue-500 shrink-0">{i + 1}.</span>
+                          <span>{s}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
 
       {/* 上传区域 */}
       <Card>

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AIChat } from '@/components/AIChat'
 import { MockInterview } from '@/components/MockInterview'
+import { FlashCards } from '@/components/FlashCards'
 import { ResumeManager } from '@/components/ResumeManager'
 import { InterviewRecords } from '@/components/InterviewRecords'
 import { ReviewAnalysis } from '@/components/ReviewAnalysis'
@@ -150,6 +151,7 @@ export default function Dashboard() {
   // 子 Tab 状态
   const [resumeSubTab, setResumeSubTab] = useState<'resumes' | 'infobank'>('resumes')
   const [reviewSubTab, setReviewSubTab] = useState<'records' | 'analysis'>('records')
+  const [mockSubTab, setMockSubTab] = useState<'mock' | 'flashcards'>('mock')
 
   useEffect(() => {
     checkUser()
@@ -389,9 +391,35 @@ export default function Dashboard() {
             <AIChat userId={user!.id} />
           </TabsContent>
 
-          {/* 模拟面试 */}
+          {/* 模拟面试 + 记忆卡片 */}
           <TabsContent value="mock" className="mt-0">
-            <MockInterview userId={user!.id} />
+            <div className="space-y-4">
+              <div className="flex gap-2 border-b pb-3">
+                <Button
+                  variant={mockSubTab === 'mock' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setMockSubTab('mock')}
+                  className="gap-1.5"
+                >
+                  <Play className="h-4 w-4" />
+                  模拟面试
+                </Button>
+                <Button
+                  variant={mockSubTab === 'flashcards' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setMockSubTab('flashcards')}
+                  className="gap-1.5"
+                >
+                  <Brain className="h-4 w-4" />
+                  记忆卡片
+                </Button>
+              </div>
+              {mockSubTab === 'mock' ? (
+                <MockInterview userId={user!.id} />
+              ) : (
+                <FlashCards userId={user!.id} />
+              )}
+            </div>
           </TabsContent>
 
           {/* 简历素材 - 合并简历管理 + 信息库 */}

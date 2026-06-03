@@ -235,6 +235,32 @@ export const api = {
     apiPost<Record<string, unknown>>('/api/data/info-attachments', data),
   deleteInfoAttachment: (id: string) => apiDelete(`/api/data/info-attachments?id=${id}`),
 
+  // Flashcards (记忆卡片)
+  getFlashcards: (params?: { tag?: string; due?: boolean }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.tag) searchParams.set('tag', params.tag)
+    if (params?.due) searchParams.set('due', 'true')
+    const qs = searchParams.toString()
+    return apiGet<Record<string, unknown>[]>(`/api/data/flashcards${qs ? `?${qs}` : ''}`)
+  },
+  createFlashcard: (data: { question: string; answer?: string; tags?: string[]; jd_reference?: string }) =>
+    apiPost<Record<string, unknown>>('/api/data/flashcards', data),
+  updateFlashcard: (data: { id: string; question?: string; answer?: string; optimized_answer?: string; tags?: string[]; jd_reference?: string }) =>
+    apiPut<Record<string, unknown>>('/api/data/flashcards', data),
+  deleteFlashcard: (id: string) => apiDelete(`/api/data/flashcards?id=${id}`),
+
+  // Flashcard Reviews (复习记录)
+  submitFlashcardReview: (data: { flashcard_id: string; quality: number }) =>
+    apiPost<{ card: Record<string, unknown>; review: { quality: number; new_interval: number; next_review_at: string } }>('/api/data/flashcard-reviews', data),
+  getFlashcardReviewLogs: (flashcardId?: string) => {
+    const qs = flashcardId ? `?flashcard_id=${flashcardId}` : ''
+    return apiGet<Record<string, unknown>[]>(`/api/data/flashcard-reviews${qs}`)
+  },
+
+  // Flashcard AI Optimize (AI 优化回答)
+  optimizeFlashcardAnswer: (data: { question: string; answer: string; jd_reference?: string }) =>
+    apiPost<{ optimized_answer: string }>('/api/flashcard-optimize', data),
+
   // File Upload
   uploadFile: async (file: File, type: 'resumes' | 'audio' | 'info' = 'resumes') => {
     const token = getToken()

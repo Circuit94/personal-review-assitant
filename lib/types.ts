@@ -152,6 +152,42 @@ export interface MockInterviewRecord {
   updated_at: string
 }
 
+// ============ 记忆卡片类型 ============
+
+export interface Flashcard {
+  id: string
+  user_id: string
+  question: string
+  answer: string
+  optimized_answer?: string
+  tags: string[]
+  jd_reference?: string
+  // SM-2 算法字段
+  ease_factor: number
+  interval: number
+  repetitions: number
+  next_review_at: string
+  // 统计
+  review_count: number
+  last_reviewed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface FlashcardReviewLog {
+  id: string
+  flashcard_id: string
+  user_id: string
+  quality: number              // 0-5
+  ease_factor_before: number
+  ease_factor_after: number
+  interval_before: number
+  interval_after: number
+  created_at: string
+}
+
+export type ReviewQuality = 0 | 1 | 2 | 3 | 4 | 5
+
 export interface SprintTask {
   time: string
   title: string
